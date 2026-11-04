@@ -47,8 +47,7 @@ supprime librement.
 - [ ] Combats à 3 contre 3 et Combats Rotatifs (X/Y) partout, combats de horde jouables
 - [ ] Changement de Pokémon en plein combat sans perdre le tour (mode tactique)
 - [ ] Combats de boss : légendaires à plusieurs phases, avec attaques propres et terrain qui change
-- [ ] Combats raid à 4 joueurs en ligne (façon Dynamax, avec Méga-Évolution)
-- [ ] Commande vocale des attaques (option)
+- [ ] Combats raid à 4 joueurs en ligne (façon Dynamax, avec Méga-Évolutions
 - [ ] Rejouer ses combats et les partager (vidéo de combat en ligne)
 - [ ] Mode spectateur et commentateur IA pour les combats en ligne
 
@@ -63,10 +62,8 @@ supprime librement.
 - [ ] Donjons générés au hasard
 - [ ] Défi d'arène à règles imposées
 - [ ] Concours d'ORAS en ligne
-- [ ] Histoire d'un autre : rejouer un passage côté PNJ
 - [ ] Speedrun intégré : chronomètre, découpage par badge, fantôme du meilleur temps
 - [ ] Mode roguelike : aventure courte, équipe aléatoire, objets à choisir entre les combats
-- [ ] Mode Ranger : capture par mini-jeu au stylet / à la souris, sans Poké Ball
 - [ ] Mode survie : vagues de dresseurs de plus en plus forts, classement en ligne
 - [ ] New Game+ : recommencer avec son Pokédex, des dresseurs plus forts et des secrets en plus
 - [ ] Mode Champion : tenir sa propre arène, que les autres joueurs viennent défier
@@ -75,7 +72,6 @@ supprime librement.
 - [ ] Pokémon Alpha (Légendes Arceus) : 10 % de chance dans les hordes, 20 % plus gros, niveau plus haut, meilleurs IV/EV, yeux rouges
 - [ ] Pokémon Baron (Légendes Arceus) : boss d'une zone, combat spécial
 - [ ] Apparitions massives et ultra-apparitions (Légendes Arceus) : beaucoup d'une espèce, chances de chromatique plus hautes
-- [ ] Capture sans combat, en lançant la Poké Ball dans le monde (Légendes Arceus)
 - [ ] Recherche du Pokédex par tâches : voir, capturer, vaincre avec telle attaque (Légendes Arceus)
 - [ ] Fabrication d'objets à partir de ressources ramassées (Légendes Arceus)
 - [ ] Rencontres visibles en monde ouvert, avec zones sauvages (Épée / Bouclier)
@@ -84,7 +80,6 @@ supprime librement.
 - [ ] Pique-nique et sandwichs avec bonus de rencontre (Écarlate / Violet)
 - [ ] Auto-combat : envoyer son Pokémon combattre seul dans le monde (Écarlate / Violet)
 - [ ] Capacités Z et Danses (Soleil / Lune)
-- [ ] Épreuves des îles à la place ou en plus des arènes (Soleil / Lune)
 - [ ] Pokémon Ride : montures appelées à tout moment (Soleil / Lune)
 - [ ] Formes régionales (Alola, Galar, Hisui, Paldea) dans Kalos et Hoenn
 - [ ] Cri de chromatique et chaîne de capture (Let's Go)
@@ -103,7 +98,6 @@ supprime librement.
 - [ ] Style Puissant / Rapide pour les attaques, ordre des tours visible (Légendes Arceus)
 - [ ] Pokémon rideable aux fonctions d'exploration : nager, grimper, planer (Légendes Arceus, Écarlate / Violet)
 - [ ] Monde ouvert sans ordre imposé : arènes dans l'ordre qu'on veut, niveaux qui s'adaptent (Écarlate / Violet)
-- [ ] Trois histoires parallèles (arènes, Titans, Team Star) au lieu d'une seule (Écarlate / Violet)
 - [ ] Coop en monde ouvert à 4 (Union) dans tout le jeu (Écarlate / Violet)
 - [ ] Ultra-apparitions et objets de rencontre : sandwichs de type, Charme Chroma (Écarlate / Violet)
 - [ ] Mentos : changer la nature (Épée / Bouclier)
@@ -119,13 +113,10 @@ supprime librement.
 ## Repris des jeux modernes (hors Pokémon)
 - [ ] Mode photo complet : pause, caméra libre, filtres, profondeur de champ, poses (jeux Sony, Forza)
 - [ ] Voyage rapide depuis la carte, et marqueurs posés par le joueur (Zelda Breath of the Wild)
-- [ ] Escalade et planeur pour explorer le relief (Zelda Breath of the Wild, avec Pokémon Vol / Roche)
 - [ ] Journal de quêtes, avec suivi et indicateur à l'écran (RPG modernes)
 - [ ] Quêtes secondaires des PNJ, avec choix et conséquences (The Witcher, Persona)
 - [ ] Liens sociaux avec les PNJ et les Champions, débloquant des bonus (Persona, Fire Emblem)
 - [ ] Logement à décorer, partageable en ligne (Animal Crossing)
-- [ ] Défis quotidiens et hebdomadaires, avec récompenses (jeux mobiles, Fortnite)
-- [ ] Passe saisonnier gratuit : événements par saison, tenues, Pokémon spéciaux (jeux en ligne)
 - [ ] Succès et trophées, avec suivi (Steam, PlayStation)
 - [ ] Personnalisation poussée du personnage : tenues, coiffures, couleurs (X / Y en plus large, jeux modernes)
 - [ ] Modes d'accessibilité complets : assistance de combat, textes, contrastes (The Last of Us Part II)
@@ -133,7 +124,6 @@ supprime librement.
 - [ ] Jeu croisé PC / téléphone pour la coop et les combats (cross-play)
 - [ ] Haptique et gyroscope : vibrations en combat, visée de la Poké Ball au gyroscope (Switch, DualSense)
 - [ ] Lumière et musique dynamiques : la musique s'enrichit en combat ou près d'un Pokémon rare (jeux modernes)
-- [ ] Mini-carte et boussole avec les objectifs (RPG modernes)
 - [ ] Rejouer une cinématique depuis un menu (théâtre)
 - [ ] Mode streamer : codes masqués, musique sans droits, interactions du chat (Twitch)
 - [ ] Ateliers de mods en ligne (Steam Workshop)
@@ -142,25 +132,18 @@ supprime librement.
 - [ ] Pokémon qui ont une mémoire : ils se souviennent des combats, des lieux, du dresseur d'origine, et réagissent en conséquence
 - [ ] Pokémon sauvages qui évoluent avec la progression du jeu (badges, étapes de l'histoire) : une route revisitée plus tard a des formes plus évoluées et des niveaux plus hauts
 - [ ] Une espèce trop capturée sur une route se raréfie, puis revient peu à peu ; une autre peut prendre sa place
-- [ ] Écosystème : prédateurs et proies
 - [ ] Pokémon qui apprennent en observant : une attaque vue souvent en combat peut être apprise
 - [ ] Rivalités entre Pokémon de l'équipe : jalousie, entente, bonus en combat en double selon leurs liens
-- [ ] Dresseurs PNJ qui capturent aussi : un Pokémon rare peut être pris par un autre avant toi
+- [ ] Dresseurs PNJ qui capturent aussi : un Pokémon rare peut être présent dans une équipe
 - [ ] Journal du Pokémon : chaque Pokémon a son carnet (où il est né, ses victoires, ses dresseurs)
 - [ ] Héritage : un Pokémon âgé transmet une attaque ou un trait à un jeune de l'équipe
 - [ ] Météo provoquée par les combats : un Groudon libéré assèche vraiment la région, un Kyogre l'inonde
-- [ ] Villes qui changent selon tes actions : aider un quartier le fait grandir, l'ignorer le fait décliner
-- [ ] Rumeurs : les PNJ parlent de Pokémon rares vus récemment, vraies ou fausses
-- [ ] Chasseurs de primes : avis de recherche sur des Pokémon sauvages dangereux, récompenses
 - [ ] Métiers de dresseur : éleveur, chercheur, ranger, coordinateur, avec leurs propres missions
 - [ ] Musées vivants : tes captures rares exposées et visitables par d'autres joueurs
 - [ ] Pokémon gardiens de lieux : chaque route a un Pokémon fort qui la protège et qu'on peut gagner
-- [ ] Défi d'équipe thématique proposé par la région chaque semaine (une couleur, une forme, une taille)
 - [ ] Combats nocturnes et diurnes différents : certains talents ou types plus forts selon l'heure
 - [ ] Pokémon blessés : soins dans le monde avec baies et objets, au lieu du seul Centre Pokémon (option)
-- [ ] Mode « dresseur ancien » : jouer à une autre époque de la région (Hoenn d'il y a 3000 ans, la guerre de Kalos)
 - [ ] Rêves : la nuit, une courte séquence jouable montre le passé d'un de tes Pokémon
-- [ ] Langage des Pokémon : comprendre peu à peu ce que dit ton partenaire, selon votre lien
 - [ ] Pokémon qui choisissent leur dresseur : certains rares ne se capturent pas, ils te rejoignent si tu remplis leurs conditions
 
 ## Idées techniques
