@@ -80,22 +80,36 @@ built so that something runs early and grows (§2).
 
 1. Repository created and set up (4 November).
 2. Step 1 (loader): done. Step 2's hard part measured (§6).
-3. Step 3, the translator's first slice (4 November): our own function list (`tools/function_list.py`, `symbols/`:
-   15,617 entries in Omega Ruby, 15,072 in X, incomplete against Ghidra's 47,750); `tools/arm2c.py` translates leaf
-   functions (no call, no stack, integer only) to C; `tools/match_leaf.py` runs each against the original instructions in
-   Unicorn on random registers and memory, 20 trials each. Omega Ruby: 1,111 translated, **782 matched, 0 mismatched**,
-   329 untestable (they read fixed global addresses outside the test memory). X: 1,062 translated, **723 matched, 0
-   mismatched**, 339 untestable. Not translated, first reason: push (a stack frame: 12,119 in Omega Ruby), tail calls
-   (362), writeback addressing (339), loads to pc (338), VFP (vldr 144, vldmia 67).
+3. Step 3, the translator's first slice (4 November): our own function list (`tools/function_list.py`, `symbols/`).
+   Its flow pass (the code followed from each known start to its return and literal pool; what follows starts the next
+   function) brought it to 27,396 entries in Omega Ruby's .code and 26,485 in X's (from 15,617 / 15,072 by calls and
+   pointers alone); 1,737 of the 1,743 .code functions Pomegrade names are among them (1,367 before). Ghidra's 47,750 is
+   not comparable as is: it counts the modules too (inferred from Pomegrade's linked program), not checked here.
+   `tools/arm2c.py` translates leaf functions (no call, no stack, integer only) to C; `tools/match_leaf.py` runs each
+   against the original instructions in Unicorn on random registers and memory, 20 trials each. Omega Ruby: 4,746
+   translated, **4,156 matched, 0 mismatched**, 590 untestable (they read fixed global addresses outside the test memory).
+   X: 4,535 translated, **4,028 matched, 0 mismatched**, 507 untestable. (One mismatch on the way was the matcher's: Unicorn
+   stopped by its instruction count inside a long loop and was compared anyway; such a trial now counts as no result.)
+   Not translated, first reason: push (a stack frame: 15,452 in Omega Ruby), tail calls (1,814), writeback addressing
+   (1,104), no unconditional return (441), loads to pc (423), VFP.
 4. Step 4, the code the two games share (owner's request, 4 November: both games are recompiled to be merged; what is
-   identical is kept once, what differs stays each game's, Pomegrade's rule of 22 October). `tools/shared_functions.py`
-   pairs the functions of the two lists, calls and literal-pool addresses set aside, into `symbols/shared_functions.tsv`
-   (measured 4 November): of Omega Ruby's 15,617 functions, **7,865 identical** (unique content in both games), 324 the
-   same code cut differently by the two lists, **1,623 near** (difflib ratio >= 0.9 over the masked words), 1,464
-   ambiguous (the same content several times in a game: small stubs, not paired), 4,341 Omega Ruby only or changed
-   beyond 0.9; X: 5,260 only or changed. Paired: 3.1 MB of Omega Ruby's 5.2 MB of listed code (60 %). Checked by sampling
-   (the paired functions open with the same instructions under capstone). Not checked: whether an "identical" pair calls
-   the same function in both games (the call targets are set aside, so two copies of one template calling different
-   functions pair too); the CROs (not compared yet).
+   identical is kept once, what differs stays each game's, Pomegrade's rule of 22 October), done 4 November.
+   `tools/cro_functions.py` lists the modules' functions (`symbols/<game>_cro_functions.tsv`: 41,651 in Omega Ruby, of
+   which 18,923 import veneers; 2,064 of the 2,088 module functions Pomegrade names found). `tools/shared_functions.py`
+   pairs the two games' functions, .code and modules in one pool, calls, literal-pool addresses and relocated words set
+   aside, into `symbols/shared_functions.tsv`:
+   - Omega Ruby's .code, 27,037 functions (veneers aside): 11,867 identical, 2,414 repeated (the same content the same
+     number of times in both games), 501 cut differently, 1,351 near (difflib >= 0.9); 62 % of its bytes paired; 67 have
+     their X copy in a module.
+   - Omega Ruby's modules, 22,728 functions: 5,226 identical, 1,173 repeated, 1,931 near; 44 % of their bytes paired (35
+     of its 145 modules are its own: contests, Delta Episode, Secret Bases...; X has 23 of its own, 110 are in both).
+   - 7,082 ambiguous (the same content a different number of times in the two games), not paired; of X's 47,238
+     functions, 22,773 have no Omega Ruby copy.
+   Checked: samples of each kind open with the same instructions; no X function paired twice; a first run paired 1-word
+   functions as "near" across a .code / module boundary, fixed (near needs 4 words, a gap inside one place). Not checked:
+   whether an identical pair calls the same functions in both games (call targets are set aside).
+   `tools/carry_names.py` carries Pomegrade's names (read where they are, not copied) to X through the pairs:
+   `symbols/x_names.tsv`, 1,557 names (1,183 through identical pairs; the kind is kept so a name carried through a near
+   pair can be told apart); 2,274 have no pair (Omega Ruby's own code, or changed).
 5. Then: the stack (push/pop, writeback, ldm/stm) and calls between translated functions (the lookup table of §6), which
    opens most of the code; then VFP; the untestable functions given the game's real memory (a RAM dump from Azahar).
