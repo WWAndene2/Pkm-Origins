@@ -87,12 +87,15 @@ built so that something runs early and grows (§2).
    329 untestable (they read fixed global addresses outside the test memory). X: 1,062 translated, **723 matched, 0
    mismatched**, 339 untestable. Not translated, first reason: push (a stack frame: 12,119 in Omega Ruby), tail calls
    (362), writeback addressing (339), loads to pc (338), VFP (vldr 144, vldmia 67).
-4. Next, the shared share of the two games (owner's request, 4 November: both games are recompiled to be merged; what
-   is identical is kept once, what differs stays each game's, Pomegrade's rule of 22 October). Measure how many functions
-   of Omega Ruby and X are byte-identical (instructions equal once the addresses they name are set aside: calls, literal
-   pool addresses), which are near-identical (the same function moved or lightly changed), and which belong to one game
-   only; a tool writes the pairs into `symbols/` so a name found in one game carries to the other. Done when the shared
-   count is measured and the pairs listed. The identical counts of step 2 (`bx rN`, `mov pc`, `add pc`) suggest a large
-   shared library part (inferred, to be measured here).
+4. Step 4, the code the two games share (owner's request, 4 November: both games are recompiled to be merged; what is
+   identical is kept once, what differs stays each game's, Pomegrade's rule of 22 October). `tools/shared_functions.py`
+   pairs the functions of the two lists, calls and literal-pool addresses set aside, into `symbols/shared_functions.tsv`
+   (measured 4 November): of Omega Ruby's 15,617 functions, **7,865 identical** (unique content in both games), 324 the
+   same code cut differently by the two lists, **1,623 near** (difflib ratio >= 0.9 over the masked words), 1,464
+   ambiguous (the same content several times in a game: small stubs, not paired), 4,341 Omega Ruby only or changed
+   beyond 0.9; X: 5,260 only or changed. Paired: 3.1 MB of Omega Ruby's 5.2 MB of listed code (60 %). Checked by sampling
+   (the paired functions open with the same instructions under capstone). Not checked: whether an "identical" pair calls
+   the same function in both games (the call targets are set aside, so two copies of one template calling different
+   functions pair too); the CROs (not compared yet).
 5. Then: the stack (push/pop, writeback, ldm/stm) and calls between translated functions (the lookup table of §6), which
    opens most of the code; then VFP; the untestable functions given the game's real memory (a RAM dump from Azahar).
