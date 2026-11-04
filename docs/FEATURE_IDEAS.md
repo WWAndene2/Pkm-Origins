@@ -69,6 +69,7 @@ supprime librement.
 - [ ] Mode Champion : tenir sa propre arène, que les autres joueurs viennent défier
 
 ## Repris des autres jeux Pokémon
+- [ ] Poké Radar / Navi-Dex amélioré : réunir le Poké Radar de X / Y (chaînes, chromatiques) et le Navi-Dex d'ORAS (de mémoire : niveau, attaque d'œuf, talent caché, « potentiel » en étoiles pour les IV parfaits ; à vérifier en jeu), et ajouter IV exacts, nature, EV donnés au combat, Alpha ou non
 - [ ] Pokémon Alpha (Légendes Arceus) : 10 % de chance dans les hordes, 20 % plus gros, niveau plus haut, meilleurs IV/EV, yeux rouges
 - [ ] Pokémon Baron (Légendes Arceus) : boss d'une zone, combat spécial
 - [ ] Apparitions massives et ultra-apparitions (Légendes Arceus) : beaucoup d'une espèce, chances de chromatique plus hautes
