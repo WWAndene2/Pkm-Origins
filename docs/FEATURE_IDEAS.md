@@ -65,6 +65,13 @@ supprime librement.
 - [ ] Défi d'arène à règles imposées
 - [ ] Concours d'ORAS en ligne
 - [ ] Speedrun intégré : chronomètre, découpage par badge, fantôme du meilleur temps
+- [ ] Classement de speedrun en ligne
+  - Catégories : Any %, 100 % (Pokédex), 8 badges, Ligue, par jeu (X, Y, ORAS) et en version fusionnée ; avec ou sans glitchs
+  - Chronomètre dans le jeu (temps réel et temps de jeu), découpage automatique par badge et par Champion
+  - Vérification : la partie enregistre ses entrées (rejeu déterministe, idées techniques) et le serveur la rejoue pour valider le temps
+  - Graine aléatoire fixe en option (« seeded runs ») pour que tous partent des mêmes conditions
+  - Fantôme du meilleur temps, comparaison en direct avec son record et le record mondial
+  - Saisons, titres et badges de profil pour les meilleurs, records visibles dans le jeu
 - [ ] Mode roguelike : aventure courte, équipe aléatoire, objets à choisir entre les combats
 - [ ] Mode survie : vagues de dresseurs de plus en plus forts, classement en ligne
 - [ ] New Game+ : recommencer avec son Pokédex, des dresseurs plus forts et des secrets en plus
