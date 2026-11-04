@@ -41,6 +41,8 @@ def main():
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     p.add_argument("--cc", default="cc")
     p.add_argument("--opt", default="-O2")
+    p.add_argument("--program", action="store_true", help="also link the runtime (src/hos/, src/platform/) into "
+                   "<out>/game, the game's program (run: game <extracted dir> <the game's .3ds>)")
     a = p.parse_args()
     code = open(a.code, "rb").read()
     rows = [l.split() for l in open(a.functions) if l.strip() and not l.startswith("#")]
@@ -122,6 +124,14 @@ def main():
         by.setdefault(why.get(s, "called, not in the list"), []).append(s)
     for w, ss in sorted(by.items(), key=lambda kv: -len(kv[1])):
         report.append("  %5d  %s  (%s)" % (len(ss), w, " ".join("%08X" % x for x in ss[:6])))
+    if a.program and not failed:
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+        runtime = sorted(os.path.join(d, f) for d, _, fs in os.walk(root) for f in fs if f.endswith(".c"))
+        game = os.path.join(a.out, "game")
+        r = subprocess.run([a.cc, "-std=c11", "-D_GNU_SOURCE", "-O2", "-Wall", "-I", HOS, "-o", game] + runtime +
+                           [lib, "-lm", "-lpthread"])
+        report.append("program: %s" % (game if r.returncode == 0 else "DOES NOT LINK"))
+        failed = failed or [game] if r.returncode else failed
     open(os.path.join(a.out, "build.txt"), "w").write("\n".join(report) + "\n")
     print("\n".join(report))
     sys.exit(1 if failed else 0)

@@ -57,23 +57,96 @@ static inline uint32_t shreg(Cpu* c, int kind, uint32_t x, uint32_t s, uint32_t*
     }
 }
 void call_indirect(Cpu* c, uint32_t t, uint32_t ret);
+/* the matching check's limits (HOS_MATCHING): a loop's steps (past 100,000: fault 2) and the call depth (past 2,000:
+   fault 2, a random endless tail-call loop), so that a trial ends; the game itself runs with none */
+#ifdef HOS_MATCHING
+#define HOS_STEP(c) do { if (++(c)->steps > 100000) { (c)->fault = 2; return; } } while (0)
+#define HOS_ENTER(c) do { if (++(c)->depth > 2000) { (c)->fault = 2; (c)->depth--; return; } } while (0)
+#define HOS_LEAVE(c) ((c)->depth--)
+#else
+#define HOS_STEP(c) ((void)0)
+#define HOS_ENTER(c) ((void)0)
+#define HOS_LEAVE(c) ((void)0)
+#endif
 /* svc #n: the 3DS kernel's system call n (src/hos/: its arguments and results in r0-r7 as the kernel's ABI has them;
    the other registers kept) */
 void hos_svc(Cpu* c, uint32_t n);
-/* VFP, as the game runs it: FPSCR 0x03C00010 (Azahar's kernel/thread.cpp, as the 3DS kernel sets each thread): default
-   NaN, flush to zero, round toward zero. The registers are bits (s[32]; d[k] is s[2k] low, s[2k+1] high); arithmetic
-   runs on the host's float / double with its rounding set toward zero (match_functions.py: fesetround, compiled with
-   -frounding-math -ffp-contract=off, so nothing is folded or fused), and these helpers add ARM's other two rules: a
-   denormal input or result is a zero of its sign (under round toward zero a result tiny before rounding stays tiny
-   after, so flushing the host's result is ARM's flush), and any NaN result is the default NaN. */
+/* the host's rounding mode set to FPSCR's (bits 22-23: nearest, up, down, toward zero) */
+#include <fenv.h>
+static inline void hos_fpscr_mode(uint32_t fpscr)
+{
+    static const int mode[4] = {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO};
+    fesetround(mode[(fpscr >> 22) & 3]);
+}
+/* VFP, as ARM's VFPv2 computes, in the mode FPSCR gives: the 3DS kernel starts each thread with 0x03C00010 (Azahar's
+   kernel/thread.cpp: default NaN, flush to zero, round toward zero) and the game's start sets 0x03000000 (round to
+   nearest; vmsr below). The registers are bits (s[32]; d[k] is s[2k] low, s[2k+1] high). The arithmetic is the host's
+   float / double in the host's rounding mode, which follows FPSCR's (each game thread is a host thread: vmsr sets it,
+   the runtime sets each new thread's); the C is compiled with -frounding-math -ffp-contract=off (nothing folded or
+   fused). These helpers add ARM's other rules: a denormal input is a zero of its sign; a result whose exact value is
+   below the smallest normal number is a zero of its sign (ARM decides before rounding: the host may round such a
+   result up to the smallest normal, which the rounding error, computed exactly, tells); a NaN result is the default
+   NaN. */
 static inline float F32(uint32_t x) { float f; memcpy(&f, &x, 4); return f; }
 static inline double F64(uint64_t x) { double f; memcpy(&f, &x, 8); return f; }
 static inline uint32_t fz32(uint32_t x) { return (x & 0x7F800000u) == 0 ? x & 0x80000000u : x; }
 static inline uint64_t fz64(uint64_t x) { return (x & 0x7FF0000000000000ull) == 0 ? x & 0x8000000000000000ull : x; }
 static inline float in32(uint32_t x) { return F32(fz32(x)); }
 static inline double in64(uint64_t x) { return F64(fz64(x)); }
-static inline uint32_t out32(float f) { uint32_t x; if (f != f) return 0x7FC00000u; memcpy(&x, &f, 4); return fz32(x); }
-static inline uint64_t out64(double f) { uint64_t x; if (f != f) return 0x7FF8000000000000ull; memcpy(&x, &f, 8); return fz64(x); }
+/* a result r: its bits, a zero of its sign when tiny (below the smallest normal) or when tiny is set (the exact value
+   was, though r rounded up to the smallest normal), the default NaN for any NaN */
+static inline uint32_t res32(float r, int tiny)
+{
+    uint32_t x;
+    if (r != r) return 0x7FC00000u;
+    memcpy(&x, &r, 4);
+    return (x & 0x7FFFFFFFu) < 0x00800000u || tiny ? x & 0x80000000u : x;
+}
+static inline uint64_t res64(double r, int tiny)
+{
+    uint64_t x;
+    if (r != r) return 0x7FF8000000000000ull;
+    memcpy(&x, &r, 8);
+    return (x & 0x7FFFFFFFFFFFFFFFull) < 0x0010000000000000ull || tiny ? x & 0x8000000000000000ull : x;
+}
+/* whether the exact product / quotient is below the smallest normal, computed exactly: for floats in double (a
+   float product is exact there, and |a / b| < m is |a| < m |b|); for doubles on the mantissas (frexp), where fma
+   gives the product's exact error and ldexp scales the quotient's bound exactly. A sum of normal numbers is tiny only
+   by cancellation, and then exact (Sterbenz), so r tells; a square root of a normal number is never tiny. */
+static inline int tiny_mul32(float a, float b) { double p = fabs((double)a * (double)b); return p != 0 && p < 0x1p-126; }
+static inline int tiny_div32(float a, float b) { return a != 0 && fabs((double)a) < 0x1p-126 * fabs((double)b); }
+static inline int tiny_mul64(double a, double b)
+{
+    if (a == 0 || b == 0 || a != a || b != b || isinf(a) || isinf(b)) return 0;
+    int ea, eb;
+    double ma = fabs(frexp(a, &ea)), mb = fabs(frexp(b, &eb)); /* in [0.5, 1) */
+    double p = ma * mb, e = fma(ma, mb, -p);                     /* exact: ma mb = p + e */
+    double t = ldexp(1.0, -1022 - ea - eb);                      /* the bound, scaled the same */
+    return p < t || (p == t && e < 0);
+}
+static inline int tiny_div64(double a, double b)
+{
+    if (a == 0 || a != a || b != b || isinf(a) || b == 0 || isinf(b)) return 0;
+    int ea, eb;
+    double ma = fabs(frexp(a, &ea)), mb = fabs(frexp(b, &eb));
+    return ma < ldexp(mb, -1022 - ea + eb); /* |a / b| < 2^-1022, both sides scaled by 2^-ea (exact: near 1) */
+}
+static inline uint32_t fadd32(float a, float b) { return res32(a + b, 0); }
+static inline uint32_t fsub32(float a, float b) { return res32(a - b, 0); }
+static inline uint32_t fmul32(float a, float b) { return res32(a * b, tiny_mul32(a, b)); }
+static inline uint32_t fdiv32(float a, float b) { return res32(a / b, tiny_div32(a, b)); }
+static inline uint32_t fsqrt32(float a) { return res32(sqrtf(a), 0); }
+static inline uint64_t fadd64(double a, double b) { return res64(a + b, 0); }
+static inline uint64_t fsub64(double a, double b) { return res64(a - b, 0); }
+static inline uint64_t fmul64(double a, double b) { return res64(a * b, tiny_mul64(a, b)); }
+static inline uint64_t fdiv64(double a, double b) { return res64(a / b, tiny_div64(a, b)); }
+static inline uint64_t fsqrt64(double a) { return res64(sqrt(a), 0); }
+/* conversions: double to float tiny when the exact double is below the smallest normal float; to double exact */
+static inline uint32_t fcvt32(double x) { if (x != x) return 0x7FC00000u;
+    return res32((float)x, x != 0 && fabs(x) < 0x1p-126); }
+static inline uint64_t fcvt64(double x) { return res64(x, 0); }
+static inline uint32_t out32(float f) { return res32(f, 0); }
+static inline uint64_t out64(double f) { return res64(f, 0); }
 static inline uint64_t rd64(Cpu* c, int k) { return (uint64_t)c->s[2 * k + 1] << 32 | c->s[2 * k]; }
 static inline void wr64(Cpu* c, int k, uint64_t v) { c->s[2 * k] = (uint32_t)v; c->s[2 * k + 1] = (uint32_t)(v >> 32); }
 /* vcmp: FPSCR's N Z C V (equal 0110, less 1000, greater 0010, unordered 0011) */
@@ -466,6 +539,11 @@ def vfp(i, word, relocated):
         if len(ops) == 3 and names[0] and re.match(r"d\d+$", names[0]):  # vmov dm, rt, rt2
             return "c->s[%d] = c->r[%d]; c->s[%d] = c->r[%d];" % (2 * dreg(0), core(1), 2 * dreg(0) + 1, core(2))
         raise Unsupported("instruction vmov form")
+    if op == "vmsr" and names[0] == "fpscr":
+        # FPSCR written: its rounding mode becomes the host's (hos_fpscr_mode); flush to zero and default NaN must stay
+        # on (what the C does), else the thread stops (fault 10) rather than compute differently
+        return ("{ uint32_t x = c->r[%d]; if ((x & 0x03000000u) != 0x03000000u || (x & 0x00300000u)) { c->r[15] = %s;"
+                " c->fault = 10; return; } c->fpscr = x; hos_fpscr_mode(x); }" % (core(1), ADDR(i.address)))
     if op == "vmrs":
         if names[0] == "apsr_nzcv":
             return "c->n = c->fpscr >> 31; c->z = (c->fpscr >> 30) & 1; c->c = (c->fpscr >> 29) & 1; c->v = (c->fpscr >> 28) & 1;"
@@ -481,9 +559,9 @@ def vfp(i, word, relocated):
         if x is None:
             raise Unsupported("instruction %s" % i.mnemonic)
         if to == "f64":
-            return "wr64(c, %d, out64((double)%s));" % (dst, x)
-        if to == "f32":
-            return "c->s[%d] = out32((float)%s);" % (dst, x)
+            return "wr64(c, %d, fcvt64((double)%s));" % (dst, x)
+        if to == "f32":  # (from f64: tiny below the float range; from an integer: rounded in the FPSCR mode)
+            return "c->s[%d] = %s;" % (dst, "fcvt32(%s)" % x if frm == "f64" else "out32((float)%s)" % x)
         if to in ("s32", "u32") and frm in ("f32", "f64"):
             return "c->s[%d] = f2%s((double)%s);" % (dst, to[0], x)
         raise Unsupported("instruction %s" % i.mnemonic)
@@ -494,7 +572,6 @@ def vfp(i, word, relocated):
     get = (lambda k: "in64(rd64(c, %d))" % reg(k)) if w == 64 else (lambda k: "in32(c->s[%d])" % reg(k))
     raw = (lambda k: "rd64(c, %d)" % reg(k)) if w == 64 else (lambda k: "c->s[%d]" % reg(k))
     put = (lambda v: "wr64(c, %d, %s);" % (reg(0), v)) if w == 64 else (lambda v: "c->s[%d] = %s;" % (reg(0), v))
-    out, T = "out%d" % w, "double" if w == 64 else "float"
     sign = "0x8000000000000000ull" if w == 64 else "0x80000000u"
     if op in ("vcmp", "vcmpe"):
         if len(ops) != 2 or not names[1]:
@@ -507,20 +584,20 @@ def vfp(i, word, relocated):
     if op == "vabs":
         return put("%s & ~%s" % (raw(1), sign))
     if op == "vsqrt":
-        return put("%s(%s(%s))" % (out, "sqrt" if w == 64 else "sqrtf", get(1)))
-    binop = {"vadd": "+", "vsub": "-", "vmul": "*", "vdiv": "/"}
+        return put("fsqrt%d(%s)" % (w, get(1)))
+    binop = {"vadd": "fadd", "vsub": "fsub", "vmul": "fmul", "vdiv": "fdiv"}
     if op in binop:
-        return put("%s((%s)(%s %s %s))" % (out, T, get(1), binop[op], get(2)))
+        return put("%s%d(%s, %s)" % (binop[op], w, get(1), get(2)))
     # the product rounded (and flushed, a NaN made the default one) before it is used: VFP's multiply-accumulate is not
     # fused; vnmul negates that product's bits (ARM's FPNeg after FPMul: a NaN product comes out as the negated default
     # NaN). The accumulator's input is flushed as any operand.
-    prod = "%s((%s)(%s * %s))" % (out, T, get(1), get(2))
+    prod = "fmul%d(%s, %s)" % (w, get(1), get(2))
     if op == "vnmul":
         return put("%s ^ %s" % (prod, sign))
     if op in ("vmla", "vmls", "vnmla", "vnmls"):
         acc = "in%d(%s%s)" % (w, raw(0), " ^ " + sign if op in ("vnmla", "vnmls") else "")
         p = "in%d(%s%s)" % (w, prod, " ^ " + sign if op in ("vmls", "vnmla") else "")
-        return put("%s((%s)(%s + %s))" % (out, T, acc, p))
+        return put("fadd%d(%s, %s)" % (w, acc, p))
     raise Unsupported("instruction %s" % i.mnemonic)
 
 
@@ -1041,7 +1118,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
     for a, s in body:
         if a in targets and a not in labelled:  # (once: a line added after an instruction carries its address too)
             labelled.add(a)
-            out.append("L%X: if (++c->steps > 100000) { c->fault = 2; return; }" % a)
+            out.append("L%X: HOS_STEP(c);" % a)
         out.append(s)
     # a branch to a place with no instruction translated (data there, or past where decoding stopped): the thread
     # stops there (fault 10), so the C is whole
@@ -1049,8 +1126,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         out.append("L%X: c->r[15] = %s; c->fault = 10; return; /* UNSUPPORTED: a branch to no translated code */"
                    % (t, ADDR(t)))
     out.append("}")
-    out.append("void %s(Cpu* c, uint32_t ret)\n{\n    if (++c->depth > 2000) { c->fault = 2; c->depth--; return; }\n"
-               "    %s_body(c, ret);\n    c->depth--;\n}\n" % (name, name))
+    out.append("void %s(Cpu* c, uint32_t ret)\n{\n    HOS_ENTER(c);\n    %s_body(c, ret);\n    HOS_LEAVE(c);\n}\n"
+               % (name, name))
     return "\n".join(out), 4 * len(body)
 
 

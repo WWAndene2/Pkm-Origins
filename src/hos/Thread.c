@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fenv.h>
 #include <time.h>
 
 pthread_mutex_t hos_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -156,6 +157,7 @@ void hos_preempt_check(HosThread* t)
 static void run(HosThread* t)
 {
     Cpu* c = &t->cpu;
+    fesetround(FE_TOWARDZERO); /* the host's rounding as the thread's FPSCR (0x03C00010: toward zero) */
     c->r[14] = THREAD_RETURN;
     call_indirect(c, t->entry, THREAD_RETURN);
     if (c->fault) {

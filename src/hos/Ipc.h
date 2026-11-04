@@ -1,0 +1,47 @@
+/* The system services' requests (svc SendSyncRequest): the command buffer is the thread's local storage + 0x80; its
+ * first word the header (command id << 16, normal words << 6, translate words), the reply in the same buffer, its
+ * second word the result. A service is a table of commands (service/<Name>.c), each answering as Azahar's does; a
+ * command not done stops the thread (fault 12: the service and command in the message), never a made-up reply.
+ */
+#ifndef HOS_IPC_H
+#define HOS_IPC_H
+
+#include "Kernel.h"
+
+typedef struct HosRequest {
+    HosThread* thread;
+    HosObject* session;
+    uint32_t buffer; /* the command buffer's game address */
+    uint32_t command; /* the command id */
+} HosRequest;
+
+typedef void (*HosCommand)(HosRequest* q);
+
+typedef struct {
+    uint16_t id;
+    HosCommand run;
+    const char* name; /* Azahar's name for it */
+} HosCommandEntry;
+
+typedef struct HosService {
+    const char* name; /* its port name ("fs:USER") */
+    const HosCommandEntry* commands; /* ending with a NULL run */
+} HosService;
+
+/* the request's words: in(q, k) the k-th word of the buffer (0 the header) */
+uint32_t hos_in(HosRequest* q, int k);
+/* the reply: header for normal / translate words, then each word */
+void hos_reply(HosRequest* q, int normal, int translate);
+void hos_out(HosRequest* q, int k, uint32_t v);
+/* a translate descriptor for n handles copied (moved) and the handles, from word k; the next word returned */
+int hos_out_handles(HosRequest* q, int k, int move, const uint32_t* handles, int n);
+/* a session to a service, as a new handle */
+uint32_t hos_session_open(const HosService* s);
+const HosService* hos_service_find(const char* name);
+
+enum { HOS_FAULT_SERVICE = 12 };
+
+/* the services, one file each in service/ */
+extern const HosService hos_srv;
+
+#endif

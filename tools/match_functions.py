@@ -39,6 +39,7 @@ REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R
         UC_ARM_REG_R7, UC_ARM_REG_R8, UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12]
 # the FPSCR every 3DS thread runs with (Azahar's kernel/thread.cpp): default NaN, flush to zero, round toward zero
 FPSCR = 0x03C00010
+FPSCR_GAME = 0x03000000  # what both games' start writes (vmsr at Omega Ruby's 001235AC): round to nearest
 RAW_MODULES = 0x40000000  # --modules all: the modules' files from here
 # the thread's local storage (mrc p15, 0, rX, c13, c0, 3): in the test memory, its words random as the rest; and an
 # ARM clrex on the return page, run before each trial
@@ -51,9 +52,15 @@ MB, MS, RET = 0x1F000000, 0x10000, 0x1E000000
 RAM = (("code.bin", 0x00100000), ("heap.bin", 0x08000000), ("linear.bin", 0x14000000), ("stack.bin", 0x0FF00000))
 
 EDGES = [0, 0x80000000, 1, 0x807FFFFF, 0x00800000, 0x7F800000, 0xFF800000, 0x7FC00000, 0x7F800001, 0xFFC00001,
-         0x7F7FFFFF, 0x4F000000, 0xCF000000, 0x4F800000, 0x3F800000, 0xBF000000]
+         0x7F7FFFFF, 0x4F000000, 0xCF000000, 0x4F800000, 0x3F800000, 0xBF000000,
+         # next to the smallest normal number and to 1: where a product or quotient is tiny before rounding and normal
+         # after (ARM flushes it), and the halfway cases of round to nearest
+         0x00800001, 0x80800001, 0x00FFFFFF, 0x3F800001, 0x3F7FFFFF, 0x3F000001, 0x3EFFFFFF, 0x1FFFFFFF, 0x20000001,
+         # (a double's high word next to its smallest normal, 2^-1022, and 1: as the high half of a d register)
+         0x00100000, 0x00100001, 0x800FFFFF, 0x3FF00000, 0x3FEFFFFF, 0x20000000]
 
 PRELUDE = r"""
+#define HOS_MATCHING 1
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
@@ -304,7 +311,7 @@ def main():
         f.write("static const uint32_t A[] = {%s};\n" % ", ".join("0x%Xu" % k for k, _ in table))
         f.write("typedef void (*Fn)(Cpu*, uint32_t);\nstatic const Fn T[] = {%s};\n" % ", ".join(n for _, n in table))
         f.write("static const Fn R[] = {%s};\n" % ", ".join(name_of[s] for s, _, _ in funcs))  # (the tested)
-        f.write("void run(int i, Cpu* c) { fesetround(FE_TOWARDZERO); R[i](c, c->r[14]); fesetround(FE_TONEAREST); }\n")
+        f.write("void run(int i, Cpu* c) { hos_fpscr_mode(c->fpscr); R[i](c, c->r[14]); fesetround(FE_TONEAREST); }\n")
         f.write("void call_indirect(Cpu* c, uint32_t t, uint32_t ret) { int lo = 0, hi = %d;"
                 " while (lo < hi) { int m = (lo + hi) / 2; if (A[m] < t) lo = m + 1; else hi = m; }"
                 " if (lo < %d && A[lo] == t) T[lo](c, ret); else c->fault = 4; }\n" % (len(table), len(table)))
@@ -426,6 +433,8 @@ def main():
                             lambda: rng.randrange(0, 256), lambda: rng.choice(EDGES)]
                 fregs = [rng.choice(fchoices)() for _ in range(32)]
                 fflags = rng.getrandbits(4)
+                # the rounding mode: the kernel's (toward zero) or the one the game sets at its start (to nearest)
+                fpscr = rng.choice((FPSCR, FPSCR_GAME))
                 cpu = Cpu()
                 for k in range(13):
                     cpu.r[k] = regs[k]
@@ -433,7 +442,7 @@ def main():
                 cpu.n, cpu.z, cpu.c, cpu.v = (flags >> 3) & 1, (flags >> 2) & 1, (flags >> 1) & 1, flags & 1
                 for k in range(32):
                     cpu.s[k] = fregs[k]
-                cpu.fpscr = FPSCR | fflags << 28
+                cpu.fpscr = fpscr | fflags << 28
                 cpu.tls = TLS
                 cmem = ctypes.create_string_buffer(mem, MS)
                 so.scratch(cmem)
@@ -450,7 +459,7 @@ def main():
                 uc.reg_write(UC_ARM_REG_FPEXC, 0x40000000)  # VFP on
                 uc.reg_write(UC_ARM_REG_C13_C0_3, TLS)
                 uc.emu_start(CLREX, CLREX + 4)  # the exclusive monitor closed, as the C's starts (a trial may leave it open)
-                uc.reg_write(UC_ARM_REG_FPSCR, FPSCR | fflags << 28)
+                uc.reg_write(UC_ARM_REG_FPSCR, fpscr | fflags << 28)
                 for k in range(32):
                     uc.reg_write(UC_ARM_REG_S0 + k, fregs[k])
                 uc.mem_write(MB, mem)
