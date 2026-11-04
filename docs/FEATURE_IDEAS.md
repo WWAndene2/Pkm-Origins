@@ -47,6 +47,8 @@ supprime librement.
 - [ ] Combats à 3 contre 3 et Combats Rotatifs (X/Y) partout, combats de horde jouables
 - [ ] Changement de Pokémon en plein combat sans perdre le tour (mode tactique)
 - [ ] Combats de boss : légendaires à plusieurs phases, avec attaques propres et terrain qui change
+- [ ] Combats multi en ligne à 2 contre 2 joueurs (existent dans X / Y et ORAS par le PSS, de mémoire ; serveurs Nintendo fermés) : à rouvrir sur nos serveurs
+- [ ] Nouveaux formats d'équipe à 2 contre 2 : multi rotatif (chaque joueur tourne ses 3 Pokémon), multi triple (3 joueurs par camp), multi en double (chaque joueur gère 2 Pokémon, 4 sur le terrain par camp)
 - [ ] Combats raid à 4 joueurs en ligne (façon Dynamax, avec Méga-Évolutions
 - [ ] Rejouer ses combats et les partager (vidéo de combat en ligne)
 - [ ] Mode spectateur et commentateur IA pour les combats en ligne
