@@ -97,6 +97,28 @@ supprime librement.
 - [ ] Souterrain et fossiles à creuser (Diamant / Perle)
 - [ ] Mystery Dungeon : donjons où l'on joue un Pokémon
 
+## Repris des jeux modernes (hors Pokémon)
+- [ ] Mode photo complet : pause, caméra libre, filtres, profondeur de champ, poses (jeux Sony, Forza)
+- [ ] Voyage rapide depuis la carte, et marqueurs posés par le joueur (Zelda Breath of the Wild)
+- [ ] Escalade et planeur pour explorer le relief (Zelda Breath of the Wild, avec Pokémon Vol / Roche)
+- [ ] Journal de quêtes, avec suivi et indicateur à l'écran (RPG modernes)
+- [ ] Quêtes secondaires des PNJ, avec choix et conséquences (The Witcher, Persona)
+- [ ] Liens sociaux avec les PNJ et les Champions, débloquant des bonus (Persona, Fire Emblem)
+- [ ] Logement à décorer, partageable en ligne (Animal Crossing)
+- [ ] Défis quotidiens et hebdomadaires, avec récompenses (jeux mobiles, Fortnite)
+- [ ] Passe saisonnier gratuit : événements par saison, tenues, Pokémon spéciaux (jeux en ligne)
+- [ ] Succès et trophées, avec suivi (Steam, PlayStation)
+- [ ] Personnalisation poussée du personnage : tenues, coiffures, couleurs (X / Y en plus large, jeux modernes)
+- [ ] Modes d'accessibilité complets : assistance de combat, textes, contrastes (The Last of Us Part II)
+- [ ] Sauvegarde dans le nuage et partie reprise sur un autre appareil (cross-save)
+- [ ] Jeu croisé PC / téléphone pour la coop et les combats (cross-play)
+- [ ] Haptique et gyroscope : vibrations en combat, visée de la Poké Ball au gyroscope (Switch, DualSense)
+- [ ] Lumière et musique dynamiques : la musique s'enrichit en combat ou près d'un Pokémon rare (jeux modernes)
+- [ ] Mini-carte et boussole avec les objectifs (RPG modernes)
+- [ ] Rejouer une cinématique depuis un menu (théâtre)
+- [ ] Mode streamer : codes masqués, musique sans droits, interactions du chat (Twitch)
+- [ ] Ateliers de mods en ligne (Steam Workshop)
+
 ## Création et mods
 - [ ] Éditeur intégré (cartes, dresseurs, scripts) avec rechargement à chaud
 - [ ] Mods en paquets, installation en un clic
