@@ -55,9 +55,12 @@ typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps;
    old byte) so that a trial can be compared on what it wrote and undone after */
 static uint8_t* RP[8]; static uint32_t RB[8], RS[8]; static int NR;
 static uint32_t* LA; static uint8_t* LV; static int NL, LMAX;
+static uint32_t RO_LO, RO_HI; /* the program's text and read-only data: read-only on the 3DS, a write faults (7) */
+void protect(uint32_t lo, uint32_t hi) { RO_LO = lo; RO_HI = hi; }
 static uint8_t* at(Cpu* c, uint32_t a, uint32_t n, int w)
 {
     if (a % n) { c->fault = 1; return 0; }
+    if (w && a + n > RO_LO && a < RO_HI) { c->fault = 7; return 0; }
     for (int i = 0; i < NR; i++)
         if (a - RB[i] <= RS[i] - n) { /* unsigned: an address near 0xFFFFFFFF cannot wrap past the check */
             uint8_t* p = RP[i] + (a - RB[i]);
@@ -91,10 +94,11 @@ TRANSLATE = None  # (code, base, sizes, ARM starts, relocated words), set before
 
 def translate_one(s):
     """(s, ((C, size), callees)), or (s, the reason it is not translated)"""
-    code, base, size, arm, relocated = TRANSLATE
+    code, base, size, arm, thumb, relocated = TRANSLATE
     try:
         callees = set()
-        c = arm2c.translate(code, base, s, s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees, relocated)
+        c = arm2c.translate(code, base, s, s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees, relocated,
+                            s in thumb, thumb)
         return s, (c, callees)
     except arm2c.Unsupported as x:
         return s, "instruction " + str(x).split()[1] if str(x).startswith("instruction") else str(x)
@@ -111,22 +115,24 @@ def main():
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="processes running the trials (default: one per CPU)")
     p.add_argument("--cro", help="the game's modules (static.crs): the words of the program they rewrite are read when run")
     p.add_argument("--only", type=lambda v: int(v, 16), help="test this function only (and what it calls)")
+    p.add_argument("--exheader", help="the program's exheader: its text and read-only data are made read-only, as on "
+                   "the 3DS (a trial writing there is impossible in the game: X's 00507F50 on a random index wrote its "
+                   "own code, 4 November)")
     p.add_argument("--ram", help="a folder of the game's memory (code.bin, heap.bin, linear.bin, stack.bin) under the tests")
     a = p.parse_args()
     code = open(a.code, "rb").read()
     rows = [l.split() for l in open(a.functions) if l.strip() and not l.startswith("#")]
     starts = sorted(int(r[0], 16) for r in rows)
-    thumb = {int(r[0], 16) for r in rows if r[3] == "thumb"}  # bounds of their neighbours; arm2c reads ARM only
+    thumb = {int(r[0], 16) for r in rows if r[3] == "thumb"}  # (arm2c translates both)
     size = {int(r[0], 16): int(r[4]) for r in rows}
     arm = frozenset(x for x in starts if x not in thumb)
     relocated = arm2c.static_relocations(a.cro) if a.cro else frozenset()
     funcs, reasons, deps = {}, {}, {}
     global TRANSLATE
-    TRANSLATE = (code, a.base, size, arm, relocated)
+    TRANSLATE = (code, a.base, size, arm, frozenset(thumb), relocated)
     with multiprocessing.get_context("fork").Pool(a.jobs) as pool_:  # translating is a third of a run: shared too
-        done = pool_.map(translate_one, [s for s in starts if s not in thumb], chunksize=256)
-    reasons["thumb"] = len(thumb & set(starts))
-    why = {s: "thumb" for s in thumb & set(starts)}  # each refused function's own reason
+        done = pool_.map(translate_one, starts, chunksize=256)
+    why = {}  # each refused function's own reason
     for s, got in done:
         if isinstance(got, str):
             reasons[got] = reasons.get(got, 0) + 1
@@ -180,9 +186,10 @@ def main():
             f.write("void f_%08X(Cpu* c, uint32_t ret);\n" % s)
         for s, c, _ in funcs:
             f.write(c + "\n")
-        # call_indirect: a binary search of the translated functions by address (an untranslated target: fault 4,
+        # call_indirect: a binary search of the translated functions by address (a Thumb one's with bit 0 set, as a
+        # pointer to it holds it: an even address to Thumb code, or odd to ARM, finds nothing) (an untranslated target: fault 4,
         # the trial does not count)
-        f.write("static const uint32_t A[] = {%s};\n" % ", ".join("0x%Xu" % s for s, _, _ in funcs))
+        f.write("static const uint32_t A[] = {%s};\n" % ", ".join("0x%Xu" % (s | (s in thumb)) for s, _, _ in funcs))
         f.write("typedef void (*Fn)(Cpu*, uint32_t);\nstatic const Fn T[] = {%s};\n" % ", ".join("f_%08X" % s for s, _, _ in funcs))
         f.write("void run(int i, Cpu* c) { fesetround(FE_TOWARDZERO); T[i](c, c->r[14]); fesetround(FE_TONEAREST); }\n")
         f.write("void call_indirect(Cpu* c, uint32_t t, uint32_t ret) { int lo = 0, hi = %d;"
@@ -232,6 +239,8 @@ def main():
         so.setup(n, ptrs, (ctypes.c_uint32 * n)(MB, *[r[0] for r in regions]),
                  (ctypes.c_uint32 * n)(MS, *[len(r[1]) for r in regions]), la, lv, LMAX)
         so.where.restype = ctypes.POINTER(ctypes.c_uint8)
+        if a.exheader:  # from the program's start to its data segment (exheader 0x30: the data segment's address)
+            so.protect(a.base, struct.unpack_from("<I", open(a.exheader, "rb").read(), 0x30)[0])
         heap_pages = [addr + o for addr, d in regions if addr == 0x08000000 for o in range(0, len(d), 0x1000)
                       if any(d[o:o + 0x1000])]
         written = set()  # what Unicorn wrote in the game's memory this trial
@@ -248,7 +257,7 @@ def main():
         uc.mem_map(MB, MS)
         uc.mem_map(RET, 0x1000)  # the return address holds "b .": Unicorn stops there (until) even when it reaches it mid-block
         uc.mem_write(RET, bytes.fromhex("feffffea") * 1024)
-        matched, mismatched, untested = 0, [], 0
+        matched, mismatched, untested, thumb_matched = 0, [], 0, 0
         for idx, (s, _, _) in enumerate(funcs):
             if idx % jobs != job:
                 continue
@@ -297,9 +306,9 @@ def main():
                 written.clear()
                 c_wrote = {la[k] for k in range(so.logged())}
                 try:
-                    uc.emu_start(s, RET, count=200000)
+                    uc.emu_start(s | (s in thumb), RET, count=200000)
                 except UcError as e:
-                    bad = "unicorn: %s" % e
+                    bad = "unicorn: %s at pc %08X (cpsr %08X)" % (e, uc.reg_read(UC_ARM_REG_PC), uc.reg_read(UC_ARM_REG_CPSR))
                     so.undo()
                     for x in written:
                         uc.mem_write(x, bytes([original_byte(x)]))
@@ -341,7 +350,8 @@ def main():
                 untested += 1
             else:
                 matched += 1
-        return matched, mismatched, untested
+                thumb_matched += s in thumb
+        return matched, mismatched, untested, thumb_matched
     # the functions shared between --jobs processes (forked: each its own Unicorn and its own copy of the C's state);
     # each function's trials are seeded by its address, so the result does not depend on the number of jobs
     readers = []
@@ -354,11 +364,11 @@ def main():
             os._exit(0)
         os.close(w)
         readers.append(r)
-    matched, mismatched, untested = 0, [], 0
+    matched, mismatched, untested, thumb_matched = 0, [], 0, 0
     for r in readers:
         with os.fdopen(r) as f:
-            m, bad, u = json.load(f)
-        matched, untested = matched + m, untested + u
+            m, bad, u, tm = json.load(f)
+        matched, untested, thumb_matched = matched + m, untested + u, thumb_matched + tm
         mismatched += [tuple(x) for x in bad]
     os.wait()  # (the children have all written: reap them)
     for _ in readers[1:]:
@@ -366,6 +376,8 @@ def main():
     mismatched.sort()
     print("%d functions in the list; %d translated (%d of them call others); %d matched, %d mismatched, %d with no valid "
           "trial" % (len(starts), len(funcs), with_calls, matched, len(mismatched), untested))
+    print("  Thumb: %d in the list, %d translated, %d matched" % (len(thumb), sum(1 for f in funcs if f[0] in thumb),
+                                                               thumb_matched))
     for s, why in mismatched[:20]:
         print("  MISMATCH %08X %s" % (s, why))
     print("not translated, by first reason (and the functions that wait for that reason alone, it included):")

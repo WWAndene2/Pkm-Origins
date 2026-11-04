@@ -238,4 +238,13 @@ Performance comes first in every design choice, the more so for the seamless co-
    and runs on every CPU: 10 min a game instead of 32. Not translated now, by the functions each reason holds alone
    (itself and its callers): blx to Thumb 1,184 (Omega Ruby), writes to pc 594, mrc 561, ldrex / strex 520, Thumb 507,
    loads to pc 489, branches out to no start 459, svc 410, pld 403, mla 298.
-   Then: blx to Thumb (Thumb functions translated), mrc, ldrex / strex; the system calls into `src/hos/`.
+   Thumb added (4 November): Thumb-1 and its bl / blx pair (ARMv6K has no other Thumb-2), pc read as + 4 (word-aligned
+   for literal loads and adr), calls between the two sets with lr's bit 0 as the CPU sets it, call_indirect finding a
+   Thumb function by its odd address; with it adc / sbc / rsc and muls. The trials now fault a write to the program's
+   text and read-only data (`--exheader`), read-only on the 3DS: X's 00507F50 on a random index wrote its own code,
+   which the game cannot do. Omega Ruby **13,880 translated, 11,428 matched, 0 mismatched** (Thumb: 309 of 507
+   translated, 265 matched; 480 translate on their own, the others call a function not translated yet), 2,452 with no
+   valid trial; X **13,666 translated, 11,252 matched, 0 mismatched** (Thumb 308 of 506, 260 matched), 2,414.
+   Now first, by the functions each reason holds alone (Omega Ruby): writes to pc 596, mrc 566, ldrex / strex 538,
+   branches out to no start 534, loads to pc 490, pld 454, svc 431, mla 313, umull 297.
+   Then: mrc, ldrex / strex, pld, the multiplies; the jumps through pc; the system calls into `src/hos/`.

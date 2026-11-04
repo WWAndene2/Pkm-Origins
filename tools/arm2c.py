@@ -16,7 +16,7 @@ import re
 import struct
 import sys
 
-from capstone import CS_ARCH_ARM, CS_MODE_ARM, Cs
+from capstone import CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_THUMB, Cs
 from capstone.arm import ARM_OP_IMM, ARM_OP_MEM, ARM_OP_REG
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -287,20 +287,36 @@ def vfp(i, word, relocated):
     raise Unsupported("instruction %s" % i.mnemonic)
 
 
-def translate(code, base, start, end, name, starts=frozenset(), callees=None, relocated=frozenset()):
-    """the C of the function at start (to end at most), or Unsupported. starts: the function list, for calls and tail
-    calls (b to a start); callees, when given, receives the functions it calls (they must be translated too);
-    relocated: the words of the program the module loader rewrites (static_relocations), read from memory when run."""
+def translate(code, base, start, end, name, starts=frozenset(), callees=None, relocated=frozenset(), thumb=False,
+              thumb_starts=frozenset()):
+    """the C of the function at start (to end at most), or Unsupported. starts: the ARM functions of the list, for calls
+    and tail calls (b to a start), thumb_starts the Thumb ones; thumb: the function itself is Thumb (Thumb-1 and the
+    bl / blx pair, as ARMv6K has it); callees, when given, receives the functions it calls (they must be translated
+    too); relocated: the words of the program the module loader rewrites (static_relocations), read from memory when run.
+    In Thumb pc reads as the instruction's address + 4 (word-aligned for pc-relative loads and adr), and a call's lr has
+    bit 0 set: the C passes the same values on, so returns and their checks work across the two instruction sets."""
     callees = set() if callees is None else callees
-    md = Cs(CS_ARCH_ARM, CS_MODE_ARM)
+    md = Cs(CS_ARCH_ARM, CS_MODE_THUMB if thumb else CS_MODE_ARM)
     md.detail = True
     word = lambda a: struct.unpack_from("<I", code, a - base)[0]
+    half = lambda a: struct.unpack_from("<H", code, a - base)[0]
+    pc_of = (lambda a: (a + 4) & ~3) if thumb else (lambda a: a + 8)  # pc as an address operand (adr, literal loads)
+
+    def is_start(t, to_thumb):
+        return t in thumb_starts if to_thumb else t in starts and t % 4 == 0
     # the words inside the function that are data, never decoded: what its pc-relative loads read (literal pools,
     # between its code too), and the address tables of its switches (ldr pc, [pc, rN, lsl #2] and the words after it)
     # (only the loads of words that are code themselves count: a pool word read as an instruction can look like a
     # pc-relative ldrd and mark two real instructions as data, as in Omega Ruby's 004FBF20; repeated until it settles)
     data, switches = set(), {}
-    for _ in range(16):
+    if thumb:  # the literal pools its ldr rX, [pc, #imm] read: their two halfwords are data
+        for a in range(start, end, 2):
+            h = half(a)
+            if h >> 11 == 0x09:
+                t = pc_of(a) + (h & 0xFF) * 4
+                if start <= t < end:
+                    data.update((t, t + 2))
+    for _ in range(0 if thumb else 16):
         new, sw = set(), {}
         for a in range(start, end, 4):
             if a in data:
@@ -318,16 +334,23 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             break
         data, switches = new, sw
     else:
-        raise Unsupported("its data words do not settle")
+        if not thumb:
+            raise Unsupported("its data words do not settle")
     insns = []
-    for a in range(start, end, 4):
+    a = start
+    while a < end:
         if a in data:
+            a += 2 if thumb else 4
             continue
         got = list(md.disasm(code[a - base:a - base + 4], a))
         if not got:
             break  # data after the function's last instruction
+        if thumb and (got[0].size == 4 and got[0].mnemonic not in ("bl", "blx") or got[0].mnemonic in ("cbz", "cbnz", "it")
+                      or got[0].mnemonic.startswith("it")):
+            raise Unsupported("Thumb-2 instruction (not on ARMv6K)")
         insns.append(got[0])
-    end_code = insns[-1].address + 4 if insns else start
+        a += got[0].size
+    end_code = insns[-1].address + insns[-1].size if insns else start
     body, targets, returned = [], set(), False
     for i in insns:
         m = i.mnemonic
@@ -356,20 +379,25 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                         "return; }" % rd())  # for this one (lr checked as at bx lr)
             returned = i.cc in (0, 15)
         elif base_m == "blx" and ops[0].type == ARM_OP_REG:  # an indirect call (virtual methods, function pointers)
+            lr = (i.address + i.size) | thumb
             line.append("{ uint32_t t = c->r[%d]; c->r[14] = 0x%Xu; call_indirect(c, t, 0x%Xu); if (c->fault) return; }"
-                        % (rd(), i.address + 4, i.address + 4))
-        elif base_m == "bl":
-            t = ops[0].imm
-            if t not in starts or t % 4:
-                raise Unsupported("call to a target that is no ARM function start")
+                        % (rd(), lr, lr))
+        elif base_m in ("bl", "blx") and ops[0].type == ARM_OP_IMM:  # blx #imm: a call that switches instruction set
+            t = ops[0].imm & 0xFFFFFFFF
+            to_thumb = thumb != (base_m == "blx")
+            if to_thumb is False:
+                t &= ~3  # (a Thumb blx's target is word-aligned)
+            if not is_start(t, to_thumb):
+                raise Unsupported("call to a target that is no function start")
             callees.add(t)
-            line.append("c->r[14] = 0x%Xu; f_%08X(c, 0x%Xu); if (c->fault) return;" % (i.address + 4, t, i.address + 4))
+            lr = (i.address + i.size) | thumb
+            line.append("c->r[14] = 0x%Xu; f_%08X(c, 0x%Xu); if (c->fault) return;" % (lr, t, lr))
         elif base_m == "b":
             t = ops[0].imm
             if start <= t < end_code:
                 targets.add(t)
                 line.append("goto L%X;" % t)
-            elif t in starts and t % 4 == 0:  # a tail call: the callee returns for this function
+            elif is_start(t, thumb):  # a tail call: the callee returns for this function
                 callees.add(t)
                 # (it returns where this one would, to lr: so lr must be that address, as at bx lr)
                 line.append("if (c->r[14] != ret) { c->fault = 3; return; } f_%08X(c, ret); return;" % t)
@@ -406,6 +434,14 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 # meaning (the original would jump elsewhere); fault 3 makes the trial invalid
                 line.append(" if (c->r[15] != ret) { c->fault = 3; return; } return;")
                 returned = i.cc in (0, 15)
+        elif thumb and base_m in ("lsl", "lsr", "asr", "ror") and len(ops) == 2 and ops[1].type == ARM_OP_REG:
+            # Thumb's lsls rd, rs: rd shifted by rs
+            kind = {"lsl": 0, "lsr": 1, "asr": 2, "ror": 3}[base_m]
+            line.append("{ uint32_t k, v = shreg(c, %d, c->r[%d], c->r[%d], &k); c->r[%d] = v;"
+                        % (kind, rd(), REG[i.reg_name(ops[1].reg)], rd()))
+            if i.update_flags:
+                line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
+            line.append(" (void)k; }")
         elif base_m in ("lsl", "lsr", "asr", "ror", "rrx") and len(ops) == 2:  # capstone's alias of mov rd, rm, <shift>
             if rd() == 15:
                 raise Unsupported("write to pc")
@@ -453,8 +489,14 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             if i.update_flags:
                 line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
             line.append(" }")
-        elif base_m in ("add", "sub", "rsb", "cmp", "cmn", "and", "orr", "eor", "bic", "tst", "teq"):
+        elif base_m == "adr":  # an address, known here
+            if rd() == 15:
+                raise Unsupported("write to pc")
+            line.append("c->r[%d] = 0x%Xu;" % (rd(), (pc_of(i.address) + ops[1].imm) & 0xFFFFFFFF))
+        elif base_m in ("add", "sub", "rsb", "adc", "sbc", "rsc", "cmp", "cmn", "and", "orr", "eor", "bic", "tst", "teq"):
             compare = base_m in ("cmp", "cmn", "tst", "teq")
+            if not compare and len(ops) == 2:  # Thumb's two-operand form: adds rd, rm / add sp, #k is rd = rd op ...
+                ops = [ops[0], ops[0], ops[1]]
             logical = base_m in ("and", "orr", "eor", "bic", "tst", "teq")
             dst = None if compare else rd()
             if dst == 15:
@@ -468,20 +510,29 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             if i.reg_name(a_op.reg) == "pc":  # add / sub rX, pc, #k: an address, known here
                 if base_m not in ("add", "sub") or compare or i.update_flags or b_op.type != ARM_OP_IMM:
                     raise Unsupported("pc-relative address")
-                v = (i.address + 8 + (b_op.imm if base_m == "add" else -b_op.imm)) & 0xFFFFFFFF
+                v = (pc_of(i.address) + (b_op.imm if base_m == "add" else -b_op.imm)) & 0xFFFFFFFF
                 body.append((i.address, "    /* %08X %s %s */ %s" % (
                     i.address, m, i.op_str, ("if (%s) { c->r[%d] = 0x%Xu; }" % (COND[i.cc], dst, v)) if i.cc not in (0, 15)
                     else "c->r[%d] = 0x%Xu;" % (dst, v))))
                 continue
             ra = "c->r[%d]" % REG[i.reg_name(a_op.reg)]
-            flags = compare or i.update_flags
+            # (from the mnemonic: capstone reports update_flags for adc / sbc with no s, as they read the carry)
+            flags = compare or (m[:-2] if i.cc not in (0, 15) else m).endswith("s")
             e, carry = operand2(i, b_op, flags and logical)
-            x, y = (e, ra) if base_m == "rsb" else (ra, e)
+            x, y = (e, ra) if base_m in ("rsb", "rsc") else (ra, e)
             line.append("{ uint32_t sk; uint32_t x = %s, y = %s, v; (void)sk;" % (x, y))
             if base_m in ("add", "cmn"):
                 line.append(" v = x + y;")
                 if flags:
                     line.append(" c->c = v < x; c->v = ((~(x ^ y) & (x ^ v)) >> 31);")
+            elif base_m == "adc":
+                line.append(" uint64_t w = (uint64_t)x + y + c->c; v = (uint32_t)w;")
+                if flags:
+                    line.append(" c->c = (uint32_t)(w >> 32); c->v = ((~(x ^ y) & (x ^ v)) >> 31);")
+            elif base_m in ("sbc", "rsc"):  # x - y - not carry
+                line.append(" uint64_t w = (uint64_t)x + (uint32_t)~y + c->c; v = (uint32_t)w;")
+                if flags:
+                    line.append(" c->c = (uint32_t)(w >> 32); c->v = (((x ^ y) & (x ^ v)) >> 31);")
             elif base_m in ("sub", "rsb", "cmp"):
                 line.append(" v = x - y;")
                 if flags:
@@ -507,8 +558,12 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             cast = {"uxtb": "(uint32_t)(uint8_t)", "uxth": "(uint32_t)(uint16_t)", "sxtb": "(uint32_t)(int8_t)",
                     "sxth": "(uint32_t)(int16_t)"}[base_m]
             line.append("c->r[%d] = %s%s;" % (rd(), cast, r))
-        elif base_m == "mul" and not i.update_flags:
-            line.append("c->r[%d] = c->r[%d] * c->r[%d];" % (rd(), REG[i.reg_name(ops[1].reg)], REG[i.reg_name(ops[2].reg)]))
+        elif base_m == "mul":  # (muls sets N and Z; on ARMv6 C and V are kept)
+            src = [REG[i.reg_name(o.reg)] for o in ops[1:]] if len(ops) == 3 else [rd(), REG[i.reg_name(ops[1].reg)]]
+            line.append("{ uint32_t v = c->r[%d] * c->r[%d]; c->r[%d] = v;" % (src[0], src[1], rd()))
+            if i.update_flags:
+                line.append(" c->n = v >> 31; c->z = v == 0;")
+            line.append(" }")
         elif base_m in ("ldrd", "strd"):  # two words: rt at the address, rt2 at + 4
             rt, rt2, mem = REG[i.reg_name(ops[0].reg)], REG[i.reg_name(ops[1].reg)], ops[2]
             basereg = i.reg_name(mem.mem.base)
@@ -559,7 +614,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             if basereg == "pc":
                 if base_m != "ldr":
                     raise Unsupported("pc-relative non-word access")
-                t = i.address + 8 + mem.mem.disp
+                t = pc_of(i.address) + mem.mem.disp
                 if t in relocated:  # a word the module loader rewrites (an import): its value only exists when run
                     line.append("c->r[%d] = ld32(c, 0x%Xu);" % (rd(), t))
                 else:
@@ -618,10 +673,10 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         last = insns[-1] if insns else None
         if last is not None and last.cc in (0, 15) and last.mnemonic == "b" and start <= last.operands[0].imm < end_code:
             pass  # it never returns: its last instruction branches back (a main loop); nothing falls off its end
-        elif end_code in starts and end_code % 4 == 0 and not (last is not None and last.mnemonic == "b"):
+        elif is_start(end_code, thumb) and not (last is not None and last.mnemonic == "b"):
             # it falls into the function placed after it (a tail call by placement: pop {r4, lr} then the next one)
             callees.add(end_code)
-            body.append((end_code - 4, "    /* falls into %08X */ if (c->r[14] != ret) { c->fault = 3; return; } "
+            body.append((last.address, "    /* falls into %08X */ if (c->r[14] != ret) { c->fault = 3; return; } "
                                        "f_%08X(c, ret); return;" % (end_code, end_code)))
         else:
             raise Unsupported("no unconditional return found")
