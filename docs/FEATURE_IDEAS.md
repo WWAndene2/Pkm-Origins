@@ -130,6 +130,8 @@ supprime librement.
 - [ ] Ateliers de mods en ligne (Steam Workshop)
 
 ## Idées originales
+- [ ] Pokémon à leur vraie taille (la taille du Pokédex) sur le terrain et en combat, en option : Wailord immense, Joliflor minuscule ; caméra de combat qui s'adapte
+- [ ] Combats sous-marins : en Plongée (Hoenn), combats dans l'eau avec ses propres règles (types Eau favorisés, attaques de Feu affaiblies, déplacement en 3D)
 - [ ] Pokémon qui ont une mémoire : ils se souviennent des combats, des lieux, du dresseur d'origine, et réagissent en conséquence
 - [ ] Pokémon sauvages qui évoluent avec la progression du jeu (badges, étapes de l'histoire) : une route revisitée plus tard a des formes plus évoluées et des niveaux plus hauts
 - [ ] Une espèce trop capturée sur une route se raréfie, puis revient peu à peu ; une autre peut prendre sa place
