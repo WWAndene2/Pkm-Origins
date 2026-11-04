@@ -258,6 +258,39 @@ Principe : la version fidèle garde tout tel quel ; chaque correction est une op
 - [ ] Attaques ou talents sans effet utile en jeu solo
   - Correction : leur donner un effet hors combat ou un effet en combat (liste à faire).
 
+### Détail : les Champions de Kalos (équipes d'origine de mémoire, à vérifier dans les données ; propositions pour le mode « Rééquilibré »)
+| Champion | Équipe d'origine (X / Y) | Proposition | Stratégie |
+|---|---|---|---|
+| Violette (Insecte) | Arakdo, Prismillon | Arakdo, Cocobaba (Écaillon), Prismillon, Lépidonille | Poudre Dodo / Para, attaques de statut |
+| Lino (Roche) | Amagara, Ptyranidur | Amagara, Ptyranidur, Racaillou, Grolem d'Alola exclu (Kalos seulement) : Nosepass | Fossiles, Piège de Roc, Rapidité |
+| Cornélia (Combat) | Kungfouine, Machopeur, Brutalibré | + Riolu / Lucario (Méga au 2e combat de la Tour) | Vitesse, Brutalibré en tête, Méga-Lucario en revanche |
+| Amaro (Plante) | Granivol, Boustiflor, Chevroum | + Roserade, Pandarbare | Soin (Synthèse, Vampigraine), Fil Toxik |
+| Lem (Électrique) | Émolga, Magnéton, Iguolta | + Rotom, Galvaran | Écran Lumière, Change Éclair, Soleil pour Iguolta |
+| Valériane (Fée) | Mysdibule, M. Mime, Nymphali | + Flabébé en Florges, Pomdorochi | Mur Lumière, Peau Féérique, Méga-Mysdibule en revanche |
+| Astera (Psy) | Bérylis, Roigada, Mistigrix | + Spectrum (Psy), Gardevoir | Distorsion, Écran Psy |
+| Urup (Glace) | Blizzaroi, Hexagel, Séracrawl | + Mamouswine, Polagriffe | Grêle, Méga-Blizzaroi en revanche |
+
+Remarques :
+- Le nombre passe de 2-3 à 4-6 selon l'ordre de l'arène ; les niveaux suivent le Multi Exp. si celui-ci reste actif.
+- Chaque Champion garde son as d'origine en dernier (fidèle à son identité).
+- Les noms et équipes d'origine viennent de la mémoire de l'agent : à confirmer dans les données des dresseurs (outils de Pomegrade, `tools/remake`) avant de rien changer.
+
+### Détail : Conseil 4 et Maître (proposition)
+- [ ] Malva (Feu), Thyméo (Eau), Narcisse (Acier), Watson (Dragon) : de 4 à 6 Pokémon, une Méga-Évolution chacun (Méga-Houndoom, Méga-Blastoise, Méga-Steelix, Méga-Dracaufeu X).
+- [ ] Dianthéa : 6 Pokémon complets avec objets, Méga-Gardevoir en dernier, une couverture de types sans faiblesse partagée.
+- [ ] Revanche : niveaux 70+, équipes de compétition (stats et talents choisis).
+
+### Détail : ORAS
+- [ ] Champions de Hoenn (équipes d'ORAS à vérifier) : même règle, 4-6 Pokémon, revanches au Tour du Vainqueur ou par Match Call.
+- [ ] Timmy : Méga-Gallame dès la Route Victoire, équipe de 6.
+- [ ] Conseil 4 de Hoenn et Pierre / Marc : Méga-Évolutions et revanches renforcées.
+- [ ] Zone de combat d'Émeraude : 7 installations, Têtes de la Zone avec équipes fixes.
+
+### Détail : difficulté
+- [ ] Trois niveaux : Fidèle (original), Rééquilibré (corrections ci-dessus), Difficile (+ niveaux, IA avancée, pas d'objets en combat contre les Champions).
+- [ ] Règle de niveau : un Pokémon au-dessus du niveau du prochain Champion gagne 0 Exp. (option).
+- [ ] Récompenses d'argent et d'Exp. ajustées pour ne pas forcer le grind en mode Difficile.
+
 ### Confort
 - [ ] Changer le Pokémon de tête et réordonner l'équipe sans menu
 - [ ] Rappel et oubli d'attaques depuis le menu, Capsules de talent plus accessibles
