@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Omega Ruby's function names carried to X through the pairs of shared_functions.py (step 4 of
-docs/RECOMPILATION_PLAN.md §7): a name found in one game names its copy in the other.
+docs/RECOMPILATION_PLAN.md §8): a name found in one game names its copy in the other.
 
   carry_names.py <function_names.tsv> <modules.tsv> <shared_functions.tsv> <out.tsv>
 

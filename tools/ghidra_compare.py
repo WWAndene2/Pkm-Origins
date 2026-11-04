@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Our function lists checked against Ghidra's (step 4 of docs/RECOMPILATION_PLAN.md §7): every function only one side
+"""Our function lists checked against Ghidra's (step 4 of docs/RECOMPILATION_PLAN.md §8): every function only one side
 has is put in a class that says which side is right, so that a disagreement is never left unexplained.
 
   ghidra_compare.py <code.bin> <exheader.bin> <cro dir> <functions.tsv> <modules.tsv> <our list> <our cro list>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Step 4 of docs/RECOMPILATION_PLAN.md §7: which functions Omega Ruby and X share. Pairs each function of one game's list
+"""Step 4 of docs/RECOMPILATION_PLAN.md §8: which functions Omega Ruby and X share. Pairs each function of one game's list
 (symbols/<game>_functions.tsv) with its copy in the other, so a name found in one game carries to the other.
 
   shared_functions.py <oras code.bin> <x code.bin> <oras_functions.tsv> <x_functions.tsv> <out.tsv> [--near 0.9]

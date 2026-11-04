@@ -76,7 +76,28 @@ built so that something runs early and grows (§2).
   fine, copying code brings its licence; to decide with the owner before any copy).
 - Performance on mid-range phones: not measured.
 
-## 7. Next actions
+## 7. Distribution and modding (owner's questions, 4 November; a design, nothing built yet)
+
+- **What is distributed: the tool that makes the program, not the program.** The C the translator writes is the game's
+  code instruction by instruction: game data (CLAUDE.md §1), never distributed. Distributed: the translator
+  (`tools/arm2c.py`, grown), the runtime (`src/hos/`, `src/platform/`: our code) and a bundled compiler (clang or zig,
+  one package each). The player gives the path of their decrypted .3ds once; the tool extracts the code, translates it to
+  C and compiles it into a program for that copy; the game's assets are read from the copy at run time. C is the
+  intermediate format so that one translation serves PC (x86-64) and Android (ARM64).
+- **Android without Android Studio.** We build an APK shell once (manifest, a small launcher activity, the runtime as an
+  ARM64 `.so`: our code, distributable). The tool compiles the game's C into `libgame.so` with the bundled compiler
+  targeting Android (the NDK's clang, or zig), puts it into the shell (an APK is a zip), aligns and signs it with a key
+  made on the player's computer: one command gives an APK to install. Open: `apksigner` needs Java (bundle a small
+  runtime, or sign in our own tool); not measured.
+- **Assets: their own formats, plus a replacement folder.** The program reads the game's GARC / BCH as they are
+  (Pomegrade's `tools/remake/` reads them). Mods go in a folder read first, in open formats (PNG textures, glTF models,
+  WAV / OGG sounds), like Pomegrade's HD texture packs; edited with ordinary tools (Blender, an image editor), with a
+  BCH to glTF converter and back to write. No engine (Godot or other) in the program; a visual editor (maps, placing
+  characters) could come later as a separate tool, if wanted.
+- Not checked: how the N64 recompilation projects ship their releases; the above follows from CLAUDE.md §1, not from
+  their example.
+
+## 8. Next actions
 
 1. Repository created and set up (4 November).
 2. Step 1 (loader): done. Step 2's hard part measured (§6).
