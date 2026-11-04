@@ -41,6 +41,16 @@ supprime librement.
 - [ ] Combats sur le terrain sans transition
 - [ ] Difficulté réglable (IA, équipes), mode Nuzlocke intégré
 - [ ] Tour de combat en ligne contre les équipes d'autres joueurs
+- [ ] Mode RTA : combats en temps réel, sans tours (attaques avec temps de recharge, esquive, déplacement dans l'arène)
+- [ ] Mode ATB : jauge de vitesse façon Final Fantasy, la Vitesse décide de la fréquence des actions
+- [ ] Ordre des actions affiché à l'avance (style Légendes Arceus : actions rapides / puissantes)
+- [ ] Combats à 3 contre 3 et Combats Rotatifs (X/Y) partout, combats de horde jouables
+- [ ] Changement de Pokémon en plein combat sans perdre le tour (mode tactique)
+- [ ] Combats de boss : légendaires à plusieurs phases, avec attaques propres et terrain qui change
+- [ ] Combats raid à 4 joueurs en ligne (façon Dynamax, avec Méga-Évolution)
+- [ ] Commande vocale des attaques (option)
+- [ ] Rejouer ses combats et les partager (vidéo de combat en ligne)
+- [ ] Mode spectateur et commentateur IA pour les combats en ligne
 
 ## Multijoueur
 - [ ] Coop sans couture (exploration et combats en duo)
@@ -54,6 +64,12 @@ supprime librement.
 - [ ] Défi d'arène à règles imposées
 - [ ] Concours d'ORAS en ligne
 - [ ] Histoire d'un autre : rejouer un passage côté PNJ
+- [ ] Speedrun intégré : chronomètre, découpage par badge, fantôme du meilleur temps
+- [ ] Mode roguelike : aventure courte, équipe aléatoire, objets à choisir entre les combats
+- [ ] Mode Ranger : capture par mini-jeu au stylet / à la souris, sans Poké Ball
+- [ ] Mode survie : vagues de dresseurs de plus en plus forts, classement en ligne
+- [ ] New Game+ : recommencer avec son Pokédex, des dresseurs plus forts et des secrets en plus
+- [ ] Mode Champion : tenir sa propre arène, que les autres joueurs viennent défier
 
 ## Création et mods
 - [ ] Éditeur intégré (cartes, dresseurs, scripts) avec rechargement à chaud
