@@ -105,15 +105,15 @@ mémoire) est remplacée ; ce qu'elle avait de faux est listé au §7.3.
 | Chevroum | 1 262 ; Herbivore ; Encornebois, Gonflette, Séisme, Lait à Boire | Rôle réel, soin déjà présent ; Demi-Tour non appris | Aucune priorité ; Demi-Tour possible pour un rôle de pivot |
 | Dedenne | 1 278 ; Bajoues ; Recyclage, Frotte-Frimousse, Tonnerre | Rôle réel (baies) ; Recyclage appris au tuteur d'ORAS seulement | Recyclage aussi dans X / Y |
 | Banshitrouye (Super) | 3 930 ; Fouille ; Feu Follet, Vampigraine, Synthèse | Rôle réel ; ma proposition (Corps Maudit, attaques) n'apportait rien | Aucune |
-| Cadoizo | 346 ; Agitation ; Prélèvement Destin, Poing Glace, Bluff, Picots, Tour Rapide, Anti-Brume | Rôle de soutien réel ; **Anti-Brume non apprenable** dans X / Y / ORAS ; Vent Arrière non appris | Anti-Brume et Vent Arrière ; ses stats (330) restent le vrai frein |
+| Cadoizo | 346 ; Agitation ; Lien du Destin, Poing Glace, Bluff, Picots, Tour Rapide, Anti-Brume | Rôle de soutien réel ; **Anti-Brume non apprenable** dans X / Y / ORAS ; Vent Arrière non appris | Anti-Brume et Vent Arrière ; ses stats (330) restent le vrai frein |
 | Lovdisc | 108 ; Hydratation ; Doux Baiser, Toxik, Ébullition, Anneau Hydro | Presque injoué ; Vœu et Glas de Soin non appris | Vœu, Glas de Soin (rôle de soigneur) ; stats (330) en cause |
 | Zarbi | 53 ; Puissance Cachée seule | Une seule attaque par conception | Idée originale : la lettre fixe le type de Puissance Cachée (non mesurée) |
-| Spinda | 658 ; **Contestation** (95 %) ; Surpuissance, Coup Bas, Vampipoing | Rôle réel grâce à Contestation + Surpuissance ; **Surpuissance non apprenable** en campagne | Surpuissance par tuteur ; garder Contestation (et non Pieds Confus) |
+| Spinda | 658 ; **Contestation** (95 %) ; Surpuissance, Coup Bas, Vampi-Poing | Rôle réel grâce à Contestation + Surpuissance ; **Surpuissance non apprenable** en campagne | Surpuissance par tuteur ; garder Contestation (et non Pieds Confus) |
 | Corayon | 412 ; Régé-Force ; Ébullition, Soin, Toxik, Piège de Roc | Rôle de poseur de pièges réel ; Tour Rapide non appris | Tour Rapide |
 | Delcatty | 666 ; Normalise ; Bluff, Coup Bas, Abri, Vœu | **Vœu et Coup Bas non apprenables** en campagne (transfert seulement) | Vœu et Coup Bas par tuteur |
 | Séracrawl | 2 822 ; Fermeté ; Avalanche, Tour Rapide, Soin, Séisme | Rôle réel ; Distorsion non appris ; sa Déf. Spé. (46) est le frein | Distorsion possible ; pas prioritaire |
 | Canarticho | 243 ; **Acharné** (71 %) ; Lame Feuille, Rapace, Danse Lames | Attaques déjà là ; le frein est le total (352) et l'objet Bâton | Pas de nouveau talent (Sniper retiré) ; le vrai levier est hors attaques (stats ou évolution d'Épée / Bouclier, à étudier) |
-| Mélokrik | 395 ; Technicien ; Toile Gluante, Aéropiqué | Rôle réel (Toile Gluante déjà apprise) | Aucune |
+| Mélokrik | 395 ; Technicien ; Toile Gluante, Aéropique | Rôle réel (Toile Gluante déjà apprise) | Aucune |
 | Parasect | 518 ; Peau Sèche ; Spore, Plaie Croix, Vampigraine, Sabotage | Rôle réel (Spore) ; Distorsion non appris | Aucune priorité |
 
 **Conclusion vérifiée** : pour la plupart de ces Pokémon, le rôle existe déjà et les joueurs le trouvent ; le frein est
