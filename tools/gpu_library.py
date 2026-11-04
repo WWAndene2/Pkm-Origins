@@ -13,8 +13,11 @@ reimplemented on Vulkan, so its functions must first be found). Two marks, read 
   engine (scenes, models) and the game.
 
   gpu_library.py <code.bin> <functions.tsv> [--names function_names.tsv] [--depth N] [--out out.tsv]
+  gpu_library.py <modules.bin> <cro_functions.tsv> --linked <modules.tsv> --base 0x40000000 [...]
 
-functions.tsv: symbols/<game>_functions.tsv (address, found by, calls, isa, size). --names: Pomegrade's
+functions.tsv: symbols/<game>_functions.tsv (address, found by, calls, isa, size). For the modules: tools/cro_link.c's
+linked image of every module and its map (module, base, size), with symbols/<game>_cro_functions.tsv (module, offset,
+found by, isa, size); a module's functions are then at its base + offset, and the output names them module+offset. --names: Pomegrade's
 tools/remake/ghidra/function_names.tsv (Omega Ruby's names, read where it is: ORAS_ENGINE.md §6), to show what an
 address is already known as. The output (addresses, counts, register ids, names: no game bytes) may be committed.
 """
@@ -38,13 +41,16 @@ def pica_register(w):
     return reg
 
 
-def read_functions(path):
+def read_functions(path, bases=None):
     out = []
     for line in open(path):
         if line.startswith("#"):
             continue
         f = line.rstrip("\n").split("\t")
-        out.append((int(f[0], 16), f[3], int(f[4])))
+        if bases is None:
+            out.append((int(f[0], 16), f[3], int(f[4])))
+        elif f[0] in bases:
+            out.append((bases[f[0]] + int(f[1], 16), f[3], int(f[4])))
     return sorted(out)
 
 
@@ -55,10 +61,25 @@ def main():
     p.add_argument("--names")
     p.add_argument("--depth", type=int, default=3)
     p.add_argument("--out")
+    p.add_argument("--linked")
+    p.add_argument("--base", type=lambda v: int(v, 0), default=BASE)
     a = p.parse_args()
     data = open(a.code, "rb").read()
-    end = BASE + len(data)
-    functions = read_functions(a.functions)
+    base = a.base
+    end = base + len(data)
+    bases, place = None, lambda f: "%08X" % f
+    if a.linked:
+        bases = {}
+        for line in open(a.linked):
+            f = line.rstrip("\n").split("\t")
+            if len(f) == 3 and f[0]:
+                bases[f[0]] = int(f[1], 16)
+        spans = sorted((b, m) for m, b in bases.items())
+
+        def place(f):
+            m = max((x for x in spans if x[0] <= f), default=(0, "?"))
+            return "%s+%06X" % (m[1], f - m[0])
+    functions = read_functions(a.functions, bases)
     names = {}
     if a.names:
         for line in open(a.names):
@@ -74,7 +95,7 @@ def main():
         for at in range(s, min(s + size, end) & ~3, 4):
             if at < s:
                 continue
-            w = struct.unpack_from("<I", data, at - BASE)[0]
+            w = struct.unpack_from("<I", data, at - base)[0]
             r = pica_register(w)
             if r is not None:
                 regs[s].add(r)
@@ -114,7 +135,7 @@ def main():
             out.write("# address\tlayer\tcallers\tregisters\tname (Pomegrade)\n")
             for f in sorted(layer, key=lambda f: (layer[f], f)):
                 r = " ".join("%03X" % x for x in sorted(regs.get(f, ())))
-                out.write("%08X\t%d\t%d\t%s\t%s\n" % (f, layer[f], len(callers[f]), r, names.get(f, "")))
+                out.write("%s\t%d\t%d\t%s\t%s\n" % (place(f), layer[f], len(callers[f]), r, names.get(f, "")))
 
 
 if __name__ == "__main__":

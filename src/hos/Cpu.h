@@ -31,9 +31,15 @@ extern uint8_t* hos_memory;
 static inline uint32_t ld32(Cpu* c, uint32_t a) { uint32_t v; (void)c; memcpy(&v, hos_memory + a, 4); return v; }
 static inline uint32_t ld16(Cpu* c, uint32_t a) { uint16_t v; (void)c; memcpy(&v, hos_memory + a, 2); return v; }
 static inline uint32_t ld8(Cpu* c, uint32_t a) { (void)c; return hos_memory[a]; }
-static inline void st32(Cpu* c, uint32_t a, uint32_t v) { (void)c; memcpy(hos_memory + a, &v, 4); }
-static inline void st16(Cpu* c, uint32_t a, uint32_t v) { uint16_t h = (uint16_t)v; (void)c; memcpy(hos_memory + a, &h, 2); }
-static inline void st8(Cpu* c, uint32_t a, uint32_t v) { (void)c; hos_memory[a] = (uint8_t)v; }
+#ifdef HOS_GPU_TRACE
+void hos_gpu_trace_store(uint32_t a); /* (GpuTrace.c: the store's writer recorded, in the linear heap) */
+#define HOS_STORE_SEEN(a) hos_gpu_trace_store(a)
+#else
+#define HOS_STORE_SEEN(a) ((void)0)
+#endif
+static inline void st32(Cpu* c, uint32_t a, uint32_t v) { (void)c; HOS_STORE_SEEN(a); memcpy(hos_memory + a, &v, 4); }
+static inline void st16(Cpu* c, uint32_t a, uint32_t v) { uint16_t h = (uint16_t)v; (void)c; HOS_STORE_SEEN(a); memcpy(hos_memory + a, &h, 2); }
+static inline void st8(Cpu* c, uint32_t a, uint32_t v) { (void)c; HOS_STORE_SEEN(a); hos_memory[a] = (uint8_t)v; }
 
 /* faults the translated code sets (besides the matching's own): a call that does not return returned (8), a function
    the build could not translate was called (9), an instruction the translator has no C for was reached (10); r15

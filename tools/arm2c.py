@@ -68,6 +68,17 @@ void call_indirect(Cpu* c, uint32_t t, uint32_t ret);
 #define HOS_ENTER(c) ((void)0)
 #define HOS_LEAVE(c) ((void)0)
 #endif
+/* the GPU trace (HOS_GPU_TRACE, src/hos/GpuTrace.c): each thread's stack of the functions it is in, so that a store
+   records its writer; nothing in any other build */
+#ifdef HOS_GPU_TRACE
+extern __thread uint32_t hos_fn_stack[8192];
+extern __thread int hos_fn_depth;
+#define HOS_FN_IN(a) do { if (hos_fn_depth < 8192) hos_fn_stack[hos_fn_depth] = (a); hos_fn_depth++; } while (0)
+#define HOS_FN_OUT() (hos_fn_depth--)
+#else
+#define HOS_FN_IN(a) ((void)0)
+#define HOS_FN_OUT() ((void)0)
+#endif
 /* svc #n: the 3DS kernel's system call n (src/hos/: its arguments and results in r0-r7 as the kernel's ABI has them;
    the other registers kept) */
 void hos_svc(Cpu* c, uint32_t n);
@@ -1133,8 +1144,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         out.append("L%X: c->r[15] = %s; c->fault = 10; return; /* UNSUPPORTED: a branch to no translated code */"
                    % (t, ADDR(t)))
     out.append("}")
-    out.append("void %s(Cpu* c, uint32_t ret)\n{\n    HOS_ENTER(c);\n    %s_body(c, ret);\n    HOS_LEAVE(c);\n}\n"
-               % (name, name))
+    out.append("void %s(Cpu* c, uint32_t ret)\n{\n    HOS_ENTER(c);\n    HOS_FN_IN(%s);\n    %s_body(c, ret);\n"
+               "    HOS_FN_OUT();\n    HOS_LEAVE(c);\n}\n" % (name, ADDR(start), name))
     return "\n".join(out), 4 * len(body)
 
 

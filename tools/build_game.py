@@ -41,6 +41,7 @@ def main():
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     p.add_argument("--cc", default="cc")
     p.add_argument("--opt", default="-O2")
+    p.add_argument("--gpu-trace", action="store_true", help="build the GPU trace in (src/hos/GpuTrace.h): slower")
     p.add_argument("--program", action="store_true", help="also link the runtime (src/hos/, src/platform/) into "
                    "<out>/game, the game's program (run: game <extracted dir> <the game's .3ds>)")
     a = p.parse_args()
@@ -87,7 +88,8 @@ def main():
                 "    if (lo < %d && A[lo] == t) T[lo](c, ret); else { c->r[15] = t; c->fault = HOS_FAULT_NOT_TRANSLATED; }\n}\n"
                 % (len(keys), len(keys)))
     srcs.append(path)
-    flags = [a.opt, "-w", "-frounding-math", "-ffp-contract=off", "-fno-strict-aliasing", "-I", HOS, "-I", a.out]
+    trace = ["-DHOS_GPU_TRACE"] if a.gpu_trace else []
+    flags = trace + [a.opt, "-w", "-frounding-math", "-ffp-contract=off", "-fno-strict-aliasing", "-I", HOS, "-I", a.out]
     failed, running = [], []
     for src in srcs:  # (at most --jobs at once)
         if len(running) >= a.jobs:
@@ -128,7 +130,7 @@ def main():
         root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
         runtime = sorted(os.path.join(d, f) for d, _, fs in os.walk(root) for f in fs if f.endswith(".c"))
         game = os.path.join(a.out, "game")
-        r = subprocess.run([a.cc, "-std=c11", "-D_GNU_SOURCE", "-O2", "-Wall", "-I", HOS, "-o", game] + runtime +
+        r = subprocess.run([a.cc, "-std=c11", "-D_GNU_SOURCE", "-O2", "-Wall"] + trace + ["-I", HOS, "-o", game] + runtime +
                            [lib, "-lm", "-lpthread"])
         report.append("program: %s" % (game if r.returncode == 0 else "DOES NOT LINK"))
         failed = failed or [game] if r.returncode else failed

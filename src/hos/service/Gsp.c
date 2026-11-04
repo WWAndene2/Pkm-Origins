@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../GpuTrace.h"
 #include "../Memory.h"
 
 enum { PSC0 = 0, PSC1 = 1, PDC0 = 2, PDC1 = 3, PPF = 4, P3D = 5, DMA = 6 };
@@ -158,6 +159,7 @@ static void trigger_cmd_req_queue(HosRequest* q)
             signal(DMA);
             break;
         case 1: /* SubmitCmdList: address, size */
+            hos_gpu_trace_list(w[1], w[2]);
             if (!command_lists++)
                 fprintf(stderr, "hos: the game's first GPU command list: %08X, %u bytes (frame %llu)\n", w[1], w[2],
                         (unsigned long long)frames);
@@ -182,6 +184,7 @@ static void trigger_cmd_req_queue(HosRequest* q)
 
 void hos_gsp_report(void)
 {
+    hos_gpu_trace_write();
     fprintf(stderr, "hos: %llu GPU command lists, %llu VBlanks\n", (unsigned long long)command_lists,
             (unsigned long long)frames);
 }
