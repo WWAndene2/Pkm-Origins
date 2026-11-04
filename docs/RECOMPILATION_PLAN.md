@@ -1,6 +1,6 @@
 # Recompilation plan
 
-Owner's request (4 November): a recompilation of X/Y and Omega Ruby/Alpha Sapphire, PC first, then Android, as native
+Owner's request (4 November): a recompilation of X/Y and Omega Ruby/Alpha Sapphire, PC and Android together (§7), as native
 programs separate from Pomegrade (no emulator, no launcher in Punica). This plan states what is known, what is estimated
 and what is not checked; estimates are marked so.
 
@@ -36,10 +36,10 @@ built so that something runs early and grows (§2).
 | 1 | Loader (`tools/n3ds_extract.py`, done 4 November): reads the player's decrypted .3ds, writes the .code decompressed, the exheader and the CROs outside the repository | done: both games' code byte-identical to Pomegrade's extraction |
 | 2 | Translator: ARM11 (ARMv6K + VFPv2) to C for the .code; CRO relocations and imports resolved | the translated .code compiles |
 | 3 | HOS layer: the services the game calls at boot (srv, APT, FS, CFG, HID, GSP, DSP stubs) | the translated game reaches its first frame of GPU commands |
-| 4 | Renderer: PICA200 command lists and shaders to Vulkan (PC) | the title screen draws |
-| 5 | Sound (DSP: the game's own audio lists to SDL audio), input, saves | the field is playable on PC |
+| 4 | Renderer: PICA200 command lists and shaders to Vulkan (PC and Android), and the Android app compiling the game on the phone (§7) | the title screen draws on the owner's phone |
+| 5 | Sound (DSP: the game's own audio lists to SDL audio), input, saves | the field is playable |
 | 6 | X/Y the same way (its own translated code; shared libraries shared) | both games run |
-| 7 | Android build (same code, ARM64 or x86-64, SDL, Vulkan / GLES) | runs on the owner's Xiaomi 13T |
+| 7 | (merged into 4: Android from the start, owner's decision of 4 November) | |
 | 8 | Decompiled modules by need, first the field camera (widescreen) | each matched (§4) |
 
 ## 4. How correctness is proven ("matching")
@@ -84,11 +84,17 @@ built so that something runs early and grows (§2).
   one package each). The player gives the path of their decrypted .3ds once; the tool extracts the code, translates it to
   C and compiles it into a program for that copy; the game's assets are read from the copy at run time. C is the
   intermediate format so that one translation serves PC (x86-64) and Android (ARM64).
-- **Android without Android Studio.** We build an APK shell once (manifest, a small launcher activity, the runtime as an
-  ARM64 `.so`: our code, distributable). The tool compiles the game's C into `libgame.so` with the bundled compiler
-  targeting Android (the NDK's clang, or zig), puts it into the shell (an APK is a zip), aligns and signs it with a key
-  made on the player's computer: one command gives an APK to install. Open: `apksigner` needs Java (bundle a small
-  runtime, or sign in our own tool); not measured.
+- **Android: compiled on the phone (owner's choice, 4 November).** GitHub Actions builds the Pkm Origins app from our
+  code only (runtime, translator, a compiler for ARM64, the interface): no game data, so it may be an artifact, as
+  Pomegrade's are. On the phone, the app reads the player's .3ds, translates its code and compiles it there, once
+  (minutes on the owner's Xiaomi 13T: estimated, not measured), then runs it: the game's code never leaves the phone,
+  no PC needed. Building the whole APK in a session and sending it was the other way, set aside: it would put game code
+  in a file sent out (CLAUDE.md §1). Open: which compiler runs inside an Android app (clang from the NDK built for
+  Android, or zig, or a smaller C compiler such as TinyCC, slower code): to measure.
+- **PC and Android together, Android for the owner's tests (owner's decision, 4 November; the owner has no PC).** One
+  code base for both (SDL for window, sound, input; Vulkan for drawing). The checks of the translation (matching) keep
+  running in the cloud sessions, on Linux; the first things to see (a first frame, the title screen) are tried on the
+  owner's phone; the PC build comes from the same code.
 - **Assets: their own formats, plus a replacement folder.** The program reads the game's GARC / BCH as they are
   (Pomegrade's `tools/remake/` reads them). Mods go in a folder read first, in open formats (PNG textures, glTF models,
   WAV / OGG sounds), like Pomegrade's HD texture packs; edited with ordinary tools (Blender, an image editor), with a

@@ -1,7 +1,7 @@
 # Project Rules — Pkm Origins
 
-Pkm Origins: a recompilation of Pokémon X/Y and Omega Ruby/Alpha Sapphire (Nintendo 3DS) into native programs, PC first,
-then Android, with no emulator; no game data in the repository (§1). The plan: `docs/RECOMPILATION_PLAN.md`.
+Pkm Origins: a recompilation of Pokémon X/Y and Omega Ruby/Alpha Sapphire (Nintendo 3DS) into native programs, PC and
+Android together (the owner tests on Android), with no emulator; no game data in the repository (§1). The plan: `docs/RECOMPILATION_PLAN.md`.
 
 Hard rules for any change. They follow Pomegrade's CLAUDE.md (verification, scope, naming, documentation homes), adapted to
 a decompilation.
