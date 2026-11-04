@@ -200,6 +200,45 @@ pokecommunity.com/threads/what-features-from-each-generation-would-you-like-to-s
 jamtest.dexerto.com/pokemon/pokemon-legends-z-a-needs-to-use-these-arceus-features-according-to-fans-2842309,
 pockettactics.com/pokemon-go/quality-of-life-improvements
 
+## Défauts de X / Y et ORAS à régler (de mémoire de l'agent, critiques souvent faites ; à vérifier dans les données avant d'agir)
+
+### Général
+- [ ] Difficulté trop basse : Multi Exp. pour toute l'équipe sans option, niveaux qui dépassent vite ceux des dresseurs
+- [ ] Bonus de Pokémon-Récré en combat (esquives, coups critiques, tenir à 1 PV) qui cassent la difficulté : en option
+- [ ] Ralentissements : Illumis (X / Y), combats en triple et effets lourds, 3D stéréo coupée sur le terrain
+- [ ] Caméra fixe et rigide dans Illumis ; ville découpée en rues séparées par des chargements
+- [ ] Après-jeu mince dans X / Y (Quartier Bordure, peu de contenu après la Ligue)
+- [ ] Peu de nouveaux Pokémon à Kalos (72), Pokédex régional dominé par d'anciennes espèces
+- [ ] Histoire de la Team Flare et des rivaux de X / Y peu développée
+- [ ] ORAS : pas de Zone de combat d'Émeraude (seulement la Maison de Combat)
+- [ ] ORAS : Pokédex des recherches (DexNav) et fonctions d'Émeraude manquantes (Zone de combat, combats revanches variés)
+- [ ] Personnalisation du personnage réduite dans ORAS par rapport à X / Y
+- [ ] Animations de combat lentes, pas d'accélération
+- [ ] Échanges et combats en ligne fermés (Nintendo Network arrêté)
+
+### Champions, Conseil 4 et dresseurs
+- [ ] Champions de Kalos avec peu de Pokémon (souvent 2 à 4) et sans objets ni stratégie
+- [ ] Conseil 4 de Kalos à 4 Pokémon, Maître Dianthéa facile
+- [ ] Rivaux de X / Y (Serena / Calem, Tierno, Trovato, Shauna) aux équipes faibles
+- [ ] Wally peu menaçant dans ORAS avant l'après-jeu
+- [ ] Revanches des Champions et du Conseil 4 avec équipes plus fortes (comme dans Noir 2 / Blanc 2)
+- [ ] IA des dresseurs qui choisit mal ses attaques et ne change pas de Pokémon
+
+### Équilibrage Pokémon (à corriger seulement en option : la version fidèle garde l'original)
+- [ ] Méga-Kangourex et Parental Bond trop fort (affaibli par Game Freak à la 7e génération)
+- [ ] Talon Flame et Ailes Bourrasque trop fort (affaibli à la 7e génération)
+- [ ] Exagide et Déclic Tactique dominant (Exagide affaibli à la 8e génération)
+- [ ] Pokémon trop faibles à revaloriser : Couafarel, Polagriffe, Flabébé et sa lignée, Pikachu non optimisé, etc. (liste à faire)
+- [ ] Méga-Évolutions déséquilibrées entre elles (certaines inutilisables)
+- [ ] Attaques ou talents sans effet utile en jeu solo (liste à faire)
+
+### Confort
+- [ ] Choisir le Pokémon de tête et réordonner l'équipe sans menu
+- [ ] Rappel d'attaques et oubli depuis le menu, Capsule de talent plus accessible
+- [ ] Œufs et élevage plus rapides (compteur visible)
+- [ ] Super Training (X / Y) remplaçable par une gestion d'EV directe
+- [ ] Chargement des Centres Pokémon et des portes plus rapide
+
 ## Création et mods
 - [ ] Éditeur intégré (cartes, dresseurs, scripts) avec rechargement à chaud
 - [ ] Mods en paquets, installation en un clic
