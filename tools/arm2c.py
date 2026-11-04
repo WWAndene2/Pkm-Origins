@@ -165,10 +165,13 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             line.append("switch (c->r[%d]) { %s default: c->fault = 5; return; }"
                         % (idx, " ".join("case %d: goto L%X;" % (k, t) for k, t in enumerate(table))))
         elif base_m == "bx" and i.reg_name(ops[0].reg) == "lr":
-            line.append("return;")
+            # the C returns to its caller: right only when lr is the address this function got (a shared epilogue pops
+            # lr from the stack: X's 00205E20); otherwise fault 3, never a silent other path
+            line.append("if (c->r[14] != ret) { c->fault = 3; return; } return;")
             returned = i.cc in (0, 15)
         elif base_m == "bx" and ops[0].type == ARM_OP_REG:  # a jump through a register: the function it lands in returns
-            line.append("call_indirect(c, c->r[%d], ret); return;" % rd())  # for this one
+            line.append("{ uint32_t t = c->r[%d]; if (c->r[14] != ret) { c->fault = 3; return; } call_indirect(c, t, ret); "
+                        "return; }" % rd())  # for this one (lr checked as at bx lr)
             returned = i.cc in (0, 15)
         elif base_m == "blx" and ops[0].type == ARM_OP_REG:  # an indirect call (virtual methods, function pointers)
             line.append("{ uint32_t t = c->r[%d]; c->r[14] = 0x%Xu; call_indirect(c, t, 0x%Xu); if (c->fault) return; }"
@@ -186,7 +189,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 line.append("goto L%X;" % t)
             elif t in starts and t % 4 == 0:  # a tail call: the callee returns for this function
                 callees.add(t)
-                line.append("f_%08X(c, ret); return;" % t)  # (it returns where this one would: a shared epilogue)
+                # (it returns where this one would, to lr: so lr must be that address, as at bx lr)
+                line.append("if (c->r[14] != ret) { c->fault = 3; return; } f_%08X(c, ret); return;" % t)
                 returned = i.cc in (0, 15)
             else:
                 raise Unsupported("branch out of the function to no function start")
@@ -435,7 +439,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         elif end_code in starts and end_code % 4 == 0 and not (last is not None and last.mnemonic == "b"):
             # it falls into the function placed after it (a tail call by placement: pop {r4, lr} then the next one)
             callees.add(end_code)
-            body.append((end_code - 4, "    /* falls into %08X */ f_%08X(c, ret); return;" % (end_code, end_code)))
+            body.append((end_code - 4, "    /* falls into %08X */ if (c->r[14] != ret) { c->fault = 3; return; } "
+                                       "f_%08X(c, ret); return;" % (end_code, end_code)))
         else:
             raise Unsupported("no unconditional return found")
     # ret: the address this function returns to (its caller's bl + 4, or what a tail call passes on), for the pop {pc}
