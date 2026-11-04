@@ -97,11 +97,15 @@ def main():
         if os.path.exists(lib):
             os.remove(lib)
         subprocess.run(["ar", "rcs", lib] + [s + ".o" for s in srcs], check=True)
-        undefined = set()
-        for line in subprocess.run(["nm", "-u", lib], capture_output=True, text=True, check=True).stdout.split("\n"):
+        # what the library needs from outside: the symbols its objects use, less those any of them defines
+        used, defined = set(), set()
+        for line in subprocess.run(["nm", lib], capture_output=True, text=True, check=True).stdout.split("\n"):
             parts_ = line.split()
             if len(parts_) == 2 and parts_[0] == "U":
-                undefined.add(parts_[1])
+                used.add(parts_[1])
+            elif len(parts_) == 3 and parts_[1] in "TDBRtdbr":
+                defined.add(parts_[2])
+        undefined = used - defined
         game = sorted(u for u in undefined if u.startswith("f_") or u == "call_indirect")
         report.append("compiled: %s (%d bytes); undefined: the runtime's %s, the C library's %s%s" % (
             lib, os.path.getsize(lib), sorted(undefined & RUNTIME_SYMBOLS),

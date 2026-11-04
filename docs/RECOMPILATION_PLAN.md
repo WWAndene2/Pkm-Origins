@@ -268,5 +268,13 @@ Performance comes first in every design choice, the more so for the seamless co-
    Services: srv, APT (A in Omega Ruby, U in X), fs:USER and its file sessions, cfg:u, gsp::Gpu, dsp::DSP, hid:USER (its
    handles only: input comes by shared memory), ldr:ro, frd:u, boss:U, ndm:u, ptm:u; X also y2r:u (its intro video) and
    nwm::UDS (the Player Search System); Omega Ruby's nwm::UDS comes later (a 14-minute run had it).
-   Then: `src/hos/` from that list, the kernel's objects first (threads, events, mutexes, the address arbiter: most of
-   the calls), then srv, fs, gsp; the jumps through pc; pld, the multiplies.
+   **The whole .code translated (4 November)**: every instruction the two games' code uses has its C (the multiplies,
+   saturating and packing instructions, the codec's parallel ones, clz, rev, msr / mrs of the flags, computed jumps as
+   switches, the import veneers, shared tails as entries of their own); an instruction with no C (data the walk took
+   for code, nearly always) is a stop (fault 10), never a guess. Omega Ruby: **26,214 translated (all 26,109 listed and
+   105 entries), 19,506 matched, 0 mismatched**, 6,708 with no valid trial; X **25,449 (all 25,350 and 99), 18,633
+   matched, 0 mismatched**, 6,816 (100 trials each). **It compiles** (tools/build_game.py, outside the repository: the C
+   holds the game's constants): Omega Ruby's 45 MB library, X's 43 MB, no stub; the only symbols they need are the
+   runtime's (hos_memory, hos_svc) and the C library's.
+   Then: the CRO modules (their code at the address the game maps them, B_<module> + offset in the C; checked on a dump
+   of the mapped region), and `src/hos/` from the list above, the kernel's objects first.

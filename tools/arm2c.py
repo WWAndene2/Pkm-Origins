@@ -585,8 +585,9 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             a += 2 if thumb else 4
             continue
         got = list(md.disasm(code[a - base:a - base + 4], a))
-        if not got:
-            break  # data after the function's last instruction
+        if not got:  # a word no instruction encodes: data (text between a function's pieces, or after its end)
+            a += 2 if thumb else 4
+            continue
         if thumb and (got[0].size == 4 and got[0].mnemonic not in ("bl", "blx") or got[0].mnemonic in ("cbz", "cbnz", "it")
                       or got[0].mnemonic.startswith("it")):
             raise Unsupported("Thumb-2 instruction (not on ARMv6K)")
@@ -1028,6 +1029,11 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             labelled.add(a)
             out.append("L%X: if (++c->steps > 100000) { c->fault = 2; return; }" % a)
         out.append(s)
+    # a branch to a place with no instruction translated (data there, or past where decoding stopped): the thread
+    # stops there (fault 10), so the C is whole
+    for t in sorted(targets - labelled):
+        out.append("L%X: c->r[15] = %s; c->fault = 10; return; /* UNSUPPORTED: a branch to no translated code */"
+                   % (t, ADDR(t)))
     out.append("}")
     out.append("void %s(Cpu* c, uint32_t ret)\n{\n    if (++c->depth > 2000) { c->fault = 2; c->depth--; return; }\n"
                "    %s_body(c, ret);\n    c->depth--;\n}\n" % (name, name))
