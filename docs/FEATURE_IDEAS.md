@@ -200,43 +200,70 @@ pokecommunity.com/threads/what-features-from-each-generation-would-you-like-to-s
 jamtest.dexerto.com/pokemon/pokemon-legends-z-a-needs-to-use-these-arceus-features-according-to-fans-2842309,
 pockettactics.com/pokemon-go/quality-of-life-improvements
 
-## Défauts de X / Y et ORAS à régler (de mémoire de l'agent, critiques souvent faites ; à vérifier dans les données avant d'agir)
+## Défauts de X / Y et ORAS à régler (de mémoire de l'agent, critiques souvent faites ; chiffres à vérifier dans les données avant d'agir)
+
+Principe : la version fidèle garde tout tel quel ; chaque correction est une option (ou un mode « Rééquilibré »).
 
 ### Général
-- [ ] Difficulté trop basse : Multi Exp. pour toute l'équipe sans option, niveaux qui dépassent vite ceux des dresseurs
-- [ ] Bonus de Pokémon-Récré en combat (esquives, coups critiques, tenir à 1 PV) qui cassent la difficulté : en option
-- [ ] Ralentissements : Illumis (X / Y), combats en triple et effets lourds, 3D stéréo coupée sur le terrain
-- [ ] Caméra fixe et rigide dans Illumis ; ville découpée en rues séparées par des chargements
-- [ ] Après-jeu mince dans X / Y (Quartier Bordure, peu de contenu après la Ligue)
+- [ ] Difficulté trop basse
+  - Cause : Multi Exp. pour toute l'équipe sans option dans X / Y et ORAS ; l'équipe dépasse vite les dresseurs.
+  - Correction : Multi Exp. désactivable ; option « niveaux plafonnés » (pas d'expérience au-delà du niveau du prochain Champion) ; mode Difficile qui monte niveaux, équipes et IA des dresseurs.
+- [ ] Bonus de Pokémon-Récré en combat (esquives, coups critiques, tenir à 1 PV, guérison de statut)
+  - Correction : option pour les couper en combat, en gardant l'affection et les mini-jeux.
+- [ ] Ralentissements (Illumis, combats triples, effets lourds, terrain sans 3D stéréo)
+  - Correction : disparaissent d'eux-mêmes en natif ; à mesurer sur téléphone modeste.
+- [ ] Illumis : caméra fixe, ville découpée en rues séparées par des chargements
+  - Correction : caméra libre en option, zones chargées en arrière-plan (idées techniques).
+- [ ] Après-jeu mince dans X / Y
+  - Correction : revanches des Champions et du Conseil 4, Quartier Bordure étendu, Zone de combat, contenu d'ORAS accessible depuis Kalos (fusion).
 - [ ] Peu de nouveaux Pokémon à Kalos (72), Pokédex régional dominé par d'anciennes espèces
-- [ ] Histoire de la Team Flare et des rivaux de X / Y peu développée
-- [ ] ORAS : pas de Zone de combat d'Émeraude (seulement la Maison de Combat)
-- [ ] Personnalisation du personnage réduite dans ORAS par rapport à X / Y
-- [ ] Animations de combat lentes, pas d'accélération
-- [ ] Échanges et combats en ligne fermés (Nintendo Network arrêté)
+  - Correction : apparitions de Kalos plus fréquentes, formes régionales de Kalos (création, en option).
+- [ ] Histoire de la Team Flare et des rivaux peu développée
+  - Correction : scènes et quêtes en plus (Equilibrium), arcs des rivaux avec leurs propres objectifs.
+- [ ] ORAS : pas de Zone de combat d'Émeraude, seulement la Maison de Combat
+  - Correction : porter la Zone de combat (plan Delta Emerald de Pomegrade).
+- [ ] Personnalisation du personnage réduite dans ORAS
+  - Correction : la garde-robe de X / Y disponible dans ORAS (fusion).
+- [ ] Animations de combat lentes
+  - Correction : vitesse x2 / x4, animations d'attaque et de capture passables.
+- [ ] Jeu en ligne fermé (Nintendo Network arrêté)
+  - Correction : nos serveurs (idées techniques).
 
 ### Champions, Conseil 4 et dresseurs
-- [ ] Champions de Kalos avec peu de Pokémon (souvent 2 à 4) et sans objets ni stratégie
+- [ ] Champions de Kalos avec peu de Pokémon (souvent 2 à 4), sans objets ni stratégie
+  - À vérifier : les équipes exactes dans les données des dresseurs.
+  - Correction : 4 à 6 Pokémon, objets tenus, talents et attaques cohérents avec le type, une stratégie par Champion (Amaro : soin et Synthèse, Lino : Vitesse, Valériane : Fée et Feinte...).
 - [ ] Conseil 4 de Kalos à 4 Pokémon, Maître Dianthéa facile
-- [ ] Rivaux de X / Y (Serena / Calem, Tierno, Trovato, Shauna) aux équipes faibles
-- [ ] Wally peu menaçant dans ORAS avant l'après-jeu
-- [ ] Revanches des Champions et du Conseil 4 avec équipes plus fortes (comme dans Noir 2 / Blanc 2)
-- [ ] IA des dresseurs qui choisit mal ses attaques et ne change pas de Pokémon
+  - Correction : 5 à 6 Pokémon chacun, Méga-Évolution pour chacun, Dianthéa avec une équipe pensée pour la stratégie (Méga-Gardevoir et couverture).
+- [ ] Rivaux de X / Y (Serena / Kalem, Tierno, Trovato, Shauna) aux équipes faibles
+  - Correction : équipes qui suivent la progression et visent les faiblesses du joueur, combats en double avec eux.
+- [ ] Timmy peu menaçant dans ORAS avant l'après-jeu
+  - Correction : équipe plus complète à la Route Victoire.
+- [ ] Pas de revanches renforcées
+  - Correction : revanches hebdomadaires des Champions et du Conseil 4 au niveau 60-70, puis 80+ (comme Noir 2 / Blanc 2).
+- [ ] IA des dresseurs faible (mauvais choix d'attaques, pas de changement de Pokémon)
+  - Correction : IA « avancée » en option : prédit les faiblesses, change de Pokémon, utilise les objets au bon moment.
 
-### Équilibrage Pokémon (à corriger seulement en option : la version fidèle garde l'original)
-- [ ] Méga-Kangourex et Amour Filial trop forts (affaibli par Game Freak à la 7e génération)
-- [ ] Flambusard et Ailes Bourrasque trop forts (affaibli à la 7e génération)
-- [ ] Exagide et Déclic Tactique dominant (Exagide affaibli à la 8e génération)
-- [ ] Pokémon trop faibles à revaloriser : Couafarel, Polagriffe, Flabébé et sa lignée, Pikachu non optimisé, etc. (liste à faire)
-- [ ] Méga-Évolutions déséquilibrées entre elles (certaines inutilisables)
-- [ ] Attaques ou talents sans effet utile en jeu solo (liste à faire)
+### Équilibrage Pokémon (option « Rééquilibré », la version fidèle garde l'original)
+- [ ] Méga-Kangourex et Amour Filial trop forts
+  - Correction : le second coup à 25 % de puissance au lieu de 50 %, comme Game Freak l'a fait à la 7e génération.
+- [ ] Flambusard et Ailes Bourrasque trop forts
+  - Correction : priorité seulement à PV pleins, comme à la 7e génération.
+- [ ] Exagide et Déclic Tactique dominant
+  - Correction : stats réduites comme à la 8e génération.
+- [ ] Pokémon trop faibles à revaloriser (Couafarel, Polagriffe, Flabébé et sa lignée...)
+  - Correction : liste à établir à partir des stats totales et de l'usage en compétition ; nouvelles attaques ou talents plutôt que stats changées.
+- [ ] Méga-Évolutions inégales (certaines inutilisables)
+  - Correction : revoir talents et stats des plus faibles ; ajouter les Méga-Évolutions de Légendes Z-A (fusion des idées modernes).
+- [ ] Attaques ou talents sans effet utile en jeu solo
+  - Correction : leur donner un effet hors combat ou un effet en combat (liste à faire).
 
 ### Confort
-- [ ] Choisir le Pokémon de tête et réordonner l'équipe sans menu
-- [ ] Rappel d'attaques et oubli depuis le menu, Capsule de talent plus accessible
-- [ ] Œufs et élevage plus rapides (compteur visible)
-- [ ] Super Training (X / Y) remplaçable par une gestion d'EV directe
-- [ ] Chargement des Centres Pokémon et des portes plus rapide
+- [ ] Changer le Pokémon de tête et réordonner l'équipe sans menu
+- [ ] Rappel et oubli d'attaques depuis le menu, Capsules de talent plus accessibles
+- [ ] Œufs et élevage plus rapides, compteur de pas visible
+- [ ] Super Training (X / Y) remplaçable par une gestion directe des EV
+- [ ] Centres Pokémon et portes plus rapides à traverser
 
 ## Création et mods
 - [ ] Éditeur intégré (cartes, dresseurs, scripts) avec rechargement à chaud
