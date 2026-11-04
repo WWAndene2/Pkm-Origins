@@ -69,6 +69,13 @@ supprime librement.
 - [ ] Mode survie : vagues de dresseurs de plus en plus forts, classement en ligne
 - [ ] New Game+ : recommencer avec son Pokédex, des dresseurs plus forts et des secrets en plus
 - [ ] Mode Champion : tenir sa propre arène, que les autres joueurs viennent défier
+- [ ] Tour des Maîtres (idée du propriétaire, inspirée de Tower of God) : une tour en ligne dont chaque étage est gardé par un vrai joueur
+  - Le gardien d'un étage est le joueur qui l'a conquis : son équipe est enregistrée et jouée par l'IA quand il n'est pas connecté (en direct s'il l'est)
+  - Battre le gardien prend sa place ; il redescend d'un étage ou doit reconquérir le sien
+  - Classement général, titres de boss (« Gardien du 50e étage », « Seigneur de la Tour » au sommet), saisons avec remise à zéro et récompenses
+  - Règles par palier d'étages (simple, double, triple, rotatif, monotype, niveau 50) pour varier les équipes
+  - Étages de boss tenus par des PNJ forts (Champions, Maîtres, légendaires) entre les étages de joueurs
+  - Anti-triche : équipes vérifiées par le serveur (stats et attaques possibles), combats simulés côté serveur
 
 ## Repris des autres jeux Pokémon
 - [ ] Poké Radar / Navi-Dex amélioré : réunir le Poké Radar de X / Y (chaînes, chromatiques) et le Navi-Dex d'ORAS (de mémoire : niveau, attaque d'œuf, talent caché, « potentiel » en étoiles pour les IV parfaits ; à vérifier en jeu), et ajouter IV exacts, nature, EV donnés au combat, Alpha ou non
