@@ -282,19 +282,20 @@ Principe : la version fidèle garde tout tel quel ; chaque correction est une op
 | Lino (Roche) | Amagara, Ptyranidur | Racaillou, Tarinor, Amagara, Ptyranidur | Fossiles, Piège de Roc, Rapidité |
 | Cornélia (Combat) | Kungfouine, Machopeur, Brutalibré | + Riolu / Lucario (Méga au 2e combat de la Tour) | Vitesse, Brutalibré en tête, Méga-Lucario en revanche |
 | Amaro (Plante) | Cotovol, Boustiflor, Chevroum | + Roserade, Tropius | Soin (Synthèse, Vampigraine), Fil Toxik |
-| Lem (Électrique) | Émolga, Magnéton, Iguolta | + Rotom, Ohmassacre | Écran Lumière, Change Éclair, Soleil pour Iguolta |
-| Valériane (Fée) | Mysdibule, M. Mime, Nymphali | + Florgès, Cupcanaille | Mur Lumière, Peau Féérique, Méga-Mysdibule en revanche |
+| Lem (Électrique) | Emolga, Magnéton, Iguolta | + Rotom, Ohmassacre | Écran Lumière, Change Éclair, Soleil pour Iguolta |
+| Valériane (Fée) | Mysdibule, M. Mime, Nymphali | + Florges, Cupcanaille | Mur Lumière, Peau Féérique, Méga-Mysdibule en revanche |
 | Astera (Psy) | Cryptéro, Roigada, Mistigrix | + Xatu, Gardevoir | Distorsion, Écran Psy |
-| Urup (Glace) | Blizzaroi, Hexagel, Séracrawl | + Mamouswine, Polagriffe | Grêle, Méga-Blizzaroi en revanche |
+| Urup (Glace) | Blizzaroi, Hexagel, Séracrawl | + Mammochon, Polagriffe | Grêle, Méga-Blizzaroi en revanche |
 
 Remarques :
 - Noms français écrits de mémoire et relus une fois ; à confirmer avec les textes du jeu.
 - Le nombre passe de 2-3 à 4-6 selon l'ordre de l'arène ; les niveaux suivent le Multi Exp. si celui-ci reste actif.
 - Chaque Champion garde son as d'origine en dernier (fidèle à son identité).
-- Les noms et équipes d'origine viennent de la mémoire de l'agent : à confirmer dans les données des dresseurs (outils de Pomegrade, `tools/remake`) avant de rien changer.
+- Équipes d'origine des Champions **vérifiées** le 4 novembre contre PokémonDB (pokemondb.net/x-y/gymleaders-elitefour) : identiques au tableau (Violette 2 Pokémon, Lino 2, les autres 3). Pas encore recoupées avec les données de dresseurs des jeux.
 
 ### Détail : Conseil 4 et Maître (proposition)
-- [ ] Malva (Feu), Thyméo (Eau), Narcisse (Acier), Dracéna (Dragon) : de 4 à 6 Pokémon, une Méga-Évolution chacun (Méga-Démolosse, Méga-Tortank, Méga-Steelix, Méga-Dracaufeu X).
+- [ ] Malva (Feu), Thyméo (Eau), Narcisse (Acier), Dracéna (Dragon) : de 4 à 6 Pokémon ; une Méga-Évolution sur un Pokémon qu'ils ont déjà : Thyméo Méga-Léviator, Narcisse Méga-Cizayox, Dracéna Méga-Altaria ; Malva n'a aucun Pokémon à Méga-Évolution (Némélios, Flambusard, Chartor, Lugulabre) : en ajouter un (Démolosse) ou s'en passer, à choisir.
+  - Équipes d'origine vérifiées (PokémonDB, 4 novembre) : Malva Némélios, Flambusard, Chartor, Lugulabre ; Thyméo Kravarech, Staross, Léviator, Golgopathe ; Narcisse Trousselin, Tarinorme, Exagide, Cizayox ; Dracéna Dragmara, Altaria, Bruyverne, Drakkarmin ; tous niveaux 63-65.
 - [ ] Dianthéa : 6 Pokémon complets avec objets, Méga-Gardevoir en dernier, une couverture de types sans faiblesse partagée.
 - [ ] Revanche : niveaux 70+, équipes de compétition (stats et talents choisis).
 
