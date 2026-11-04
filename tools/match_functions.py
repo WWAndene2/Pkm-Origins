@@ -24,7 +24,7 @@ import struct
 import subprocess
 import tempfile
 
-from unicorn import UC_ARCH_ARM, UC_HOOK_MEM_WRITE, UC_MODE_ARM, Uc, UcError
+from unicorn import UC_ARCH_ARM, UC_HOOK_INTR, UC_HOOK_MEM_WRITE, UC_MODE_ARM, Uc, UcError
 from unicorn.arm_const import (UC_ARM_REG_CPSR, UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
                                UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_R8,
                                UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12, UC_ARM_REG_SP,
@@ -89,11 +89,35 @@ void setup(int nr, uint8_t** p, uint32_t* b, uint32_t* s, uint32_t* la, uint8_t*
 void scratch(uint8_t* p) { RP[0] = p; NL = 0; }
 int logged(void) { return NL; }
 uint8_t* where(uint32_t a) { for (int i = 1; i < NR; i++) if (a - RB[i] < RS[i]) return RP[i] + (a - RB[i]); return 0; }
+/* the system calls, as the trials stand them in: the same mixing of the call's number and r0-r7 written to r0-r3 on both
+   sides (svc_stand_in in Python for Unicorn), so that what the function does around a call is compared; what the call
+   itself does is src/hos/'s, checked apart */
+void hos_svc(Cpu* c, uint32_t n)
+{
+    uint32_t h = n * 0x9E3779B1u;
+    for (int k = 0; k < 8; k++) { h ^= c->r[k]; h *= 0x85EBCA6Bu; h ^= h >> 13; }
+    for (int k = 0; k < 4; k++) { c->r[k] = h; h *= 0xC2B2AE35u; h ^= h >> 16; }
+}
 void undo(void) { while (NL) { NL--; *where(LA[NL]) = LV[NL]; } }
 """
 
 
 TRANSLATE = None  # (code, base, sizes, ARM starts, relocated words), set before the translating processes fork
+
+
+def svc_stand_in(n, r):
+    """hos_svc of the trials' C, for Unicorn: r0-r3 from the call's number and r0-r7"""
+    h = (n * 0x9E3779B1) & 0xFFFFFFFF
+    for k in range(8):
+        h ^= r[k]
+        h = (h * 0x85EBCA6B) & 0xFFFFFFFF
+        h ^= h >> 13
+    out = []
+    for _ in range(4):
+        out.append(h)
+        h = (h * 0xC2B2AE35) & 0xFFFFFFFF
+        h ^= h >> 16
+    return out
 
 
 def translate_one(s):
@@ -265,6 +289,19 @@ def main():
                 if addr <= x < addr + len(d):
                     return d[x - addr]
         uc.mem_map(MB, MS)
+
+        def on_svc(uc_, intno, user):  # pc is past the svc: its number is in the instruction there
+            pc = uc_.reg_read(UC_ARM_REG_PC)
+            if intno != 2:
+                uc_.emu_stop()
+                return
+            if uc_.reg_read(UC_ARM_REG_CPSR) & 0x20:
+                n = int.from_bytes(uc_.mem_read(pc - 2, 2), "little") & 0xFF
+            else:
+                n = int.from_bytes(uc_.mem_read(pc - 4, 4), "little") & 0xFFFFFF
+            for reg, v in zip(REGS, svc_stand_in(n, [uc_.reg_read(REGS[k]) for k in range(8)])):
+                uc_.reg_write(reg, v)
+        uc.hook_add(UC_HOOK_INTR, on_svc)
         uc.mem_map(RET, 0x1000)  # the return address holds "b .": Unicorn stops there (until) even when it reaches it mid-block
         uc.mem_write(RET, bytes.fromhex("feffffea") * 1024)
         uc.mem_write(CLREX, bytes.fromhex("1ff07ff5"))

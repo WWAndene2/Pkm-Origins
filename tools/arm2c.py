@@ -53,6 +53,9 @@ static inline uint32_t shreg(Cpu* c, int kind, uint32_t x, uint32_t s, uint32_t*
     }
 }
 void call_indirect(Cpu* c, uint32_t t, uint32_t ret);
+/* svc #n: the 3DS kernel's system call n (src/hos/: its arguments and results in r0-r7 as the kernel's ABI has them;
+   the other registers kept) */
+void hos_svc(Cpu* c, uint32_t n);
 /* VFP, as the game runs it: FPSCR 0x03C00010 (Azahar's kernel/thread.cpp, as the 3DS kernel sets each thread): default
    NaN, flush to zero, round toward zero. The registers are bits (s[32]; d[k] is s[2k] low, s[2k+1] high); arithmetic
    runs on the host's float / double with its rounding set toward zero (match_functions.py: fesetround, compiled with
@@ -411,6 +414,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         line = []
         if m.startswith("v"):
             line.append(vfp(i, word, relocated))
+        elif base_m == "svc":
+            line.append("hos_svc(c, 0x%Xu); if (c->fault) return;" % (ops[0].imm & 0xFFFFFF))
         elif base_m in ("mrc", "mcr"):
             line.append(coprocessor(i, base_m))
         elif base_m in EXCLUSIVE or base_m == "clrex":
