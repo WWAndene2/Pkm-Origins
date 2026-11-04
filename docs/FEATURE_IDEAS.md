@@ -321,6 +321,23 @@ Remarques :
 - [ ] Super Training (X / Y) remplaçable par une gestion directe des EV
 - [ ] Centres Pokémon et portes plus rapides à traverser
 
+## Mods existants à étudier (recherche du 4 novembre ; non testés, pour s'en inspirer ou les porter avec l'accord de leurs auteurs)
+- [ ] Rising Ruby / Sinking Sapphire (Drayano, ORAS) : les 721 Pokémon capturables dans l'aventure, difficulté revue
+- [ ] Rutile Ruby / Star Sapphire (Dio Vento, ORAS)
+- [ ] Repolished (ORAS) : « Vanilla+ », difficulté ajustée, léger
+- [ ] Eternal X / Wilting Y (Buffel Saft, X / Y)
+- [ ] Neo X / Neo Y (Flintiex, X / Y) : courbe de difficulté, plus d'espèces à Kalos
+- [ ] Ancestral X (X / Y) : difficulté pour Nuzlocke
+- [ ] Pokémon Double XY : tous les combats en double, niveaux plus durs (liste GameBrew)
+- [ ] Gen 6 CTRPF Overhauled : plugin Luma / Azahar (apparition de Pokémon sauvages, retour des légendaires, outils)
+- [ ] Patch chromatique 100 % par édition du code (Project Pokémon) : montre la méthode de patch du code
+- [ ] Pokémon à leur vraie taille (GBAtemp, voir « Idées originales »)
+
+Sources : projectpokemon.org (topic 38629 Rising Ruby and Sinking Sapphire ; tutoriel « shiny rate 100 » r96),
+whatifgaming.com (3DS ROM hacks 2024), gamebrew.org/wiki/List_of_all_3DS_Rom_Hacks,
+gamebrew.org/wiki/Gen6CTRPluginFrameworkOverhauled_3DS, gbatemp.net/posts/10847020/. Non trouvés : un mod 60 fps, écran
+large ou Pokémon qui suit pour X / Y / ORAS.
+
 ## Création et mods
 - [ ] Éditeur intégré (cartes, dresseurs, scripts) avec rechargement à chaud
 - [ ] Mods en paquets, installation en un clic
