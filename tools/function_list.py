@@ -29,7 +29,7 @@ tail call; a pop of lr or nop padding followed by a push ends a function that fa
 another known one starts; a start a conditional branch of the function before it reaches is merged back into it.
 
 Checked (4 November) against Ghidra's own analysis with tools/ghidra_compare.py, and every function decoded whole: see
-docs/RECOMPILATION_PLAN.md §9.
+docs/RECOMPILATION_PLAN.md §10.
 Needs capstone.
 """
 import argparse

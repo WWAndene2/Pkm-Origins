@@ -145,7 +145,30 @@ default (CLAUDE.md §2), chosen for what a tiler does cheaply:
 What the 13T sustains in each setting (heat, frame time over 30 minutes, as Pomegrade's study measured Eden) is to be
 measured, not assumed.
 
-## 9. Next actions
+## 9. True seamless, no lag (owner's request, 4 November: the main goal after faithfulness; a design, nothing measured)
+
+Performance comes first in every design choice, the more so for the seamless co-op and online ideas
+(`docs/FEATURE_IDEAS.md`), where a stall on one player's phone stalls the other's game.
+- **Tier 1, nothing changed in the game: loads made almost instant.** The 3DS's loads are its cartridge's speed, the
+  decompression and its 256 MB of memory. Here the HOS layer's file service (`src/hos/`) answers from memory: the
+  archives of the current region read and decompressed once, ahead, on a background thread (the 13T has 8 GB); a file
+  the game asks for is then a copy, not a read. Measured once the game runs: the time of every load, before and after.
+- **Tier 2, the waits the game imposes removed (mods).** What remains are the game's own fades, doors and transition
+  screens that wait a fixed time: code to change, function by function, once those parts are read (Pomegrade's
+  `tools/remake/ORAS_ENGINE.md` already covers the zone change).
+- **Tier 3, one continuous world.** The next zone loaded in the background while the player walks, a town to a route,
+  Kalos to Hoenn, with no cut: deep work on how the game handles its zones (the "background loading" and "Kalos and
+  Hoenn linked" ideas, rated 2).
+- **No lag: rules for the runtime from the start.** Nothing blocks the frame: file access, decompression and shader /
+  pipeline building on background threads, never in the frame (shaders built when the game is compiled on the phone,
+  §8); no CPU wait on the GPU; memory set up before play, no allocation spikes in a frame. A frame budget checked by
+  measurement, not assumed: frame time and its worst cases (the longest frame of each minute) logged on the phone, as
+  Pomegrade's study logged Eden's.
+- **Co-op and online.** The same rules on both sides, plus what multiplayer adds: each player's world streamed on their
+  own phone, the game's state exchanged rather than waited for (rollback netcode, in the technical ideas), so a slow
+  connection never freezes a frame. Designed when the game runs alone without a stall, not before.
+
+## 10. Next actions
 
 1. Repository created and set up (4 November).
 2. Step 1 (loader): done. Step 2's hard part measured (§6).
