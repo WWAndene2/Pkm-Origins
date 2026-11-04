@@ -140,8 +140,9 @@ supprime librement.
 
 ## Idées originales
 - [ ] Pokémon qui ont une mémoire : ils se souviennent des combats, des lieux, du dresseur d'origine, et réagissent en conséquence
-- [ ] Pokémon sauvages qui évoluent seuls avec le temps : une zone visitée tard a des formes plus évoluées
-- [ ] Écosystème : prédateurs et proies, une espèce trop capturée se raréfie, une autre la remplace
+- [ ] Pokémon sauvages qui évoluent avec la progression du jeu (badges, étapes de l'histoire) : une route revisitée plus tard a des formes plus évoluées et des niveaux plus hauts
+- [ ] Une espèce trop capturée sur une route se raréfie, puis revient peu à peu ; une autre peut prendre sa place
+- [ ] Écosystème : prédateurs et proies
 - [ ] Pokémon qui apprennent en observant : une attaque vue souvent en combat peut être apprise
 - [ ] Rivalités entre Pokémon de l'équipe : jalousie, entente, bonus en combat en double selon leurs liens
 - [ ] Dresseurs PNJ qui capturent aussi : un Pokémon rare peut être pris par un autre avant toi
