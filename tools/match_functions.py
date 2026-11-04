@@ -160,6 +160,8 @@ def main():
     p.add_argument("--modules", choices=["all"], help="test every module of --cro, each mapped as its file from "
                    "0x40000000 (where the 3DS maps nothing): its relocated words read as the file has them, the same on "
                    "both sides")
+    p.add_argument("--linked", help="with --modules all: tools/cro_link.c's modules.tsv, each module tested where it "
+                   "was linked (its modules.bin and data.bin given with --map)")
     p.add_argument("--with-code", help="with --module: the .code's function list; the .code (the code argument) is "
                    "translated and compiled beside the module, so the module's calls into it run")
     p.add_argument("--map", action="append", default=[], help="FILE@ADDRESS: more of the game's memory under the tests")
@@ -180,11 +182,18 @@ def main():
         mods = {m.name: m for m in cro_functions.load(a.cro)}
         names = sorted(mods) if a.modules == "all" else [a.module]
         at = RAW_MODULES
+        linked = {}
+        if a.linked:  # tools/cro_link.c's map: where each module was linked (its image given with --map)
+            for line in open(a.linked):
+                f_ = line.split()
+                linked[f_[0]] = int(f_[1], 16)
         for name in names:
             m = mods[name]
             mrows = [[r[1], r[2], "0", r[3], r[4]] for r in rows if r[0] == name]
             if a.module:
                 vb_ = a.module_base
+            elif a.linked:
+                vb_ = linked[name]
             else:  # (each file as it is, one after the other: what the matching compares does not depend on where)
                 vb_, at = at, (at + len(m.data) + 0xFFF) & ~0xFFF
                 raw.append((vb_, m.data))
