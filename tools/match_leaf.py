@@ -55,10 +55,15 @@ def main():
     p.add_argument("--keep")
     a = p.parse_args()
     code = open(a.code, "rb").read()
-    starts = sorted(int(l.split()[0], 16) for l in open(a.functions) if l.strip() and not l.startswith("#"))
+    rows = [l.split() for l in open(a.functions) if l.strip() and not l.startswith("#")]
+    starts = sorted(int(r[0], 16) for r in rows)
+    thumb = {int(r[0], 16) for r in rows if r[3] == "thumb"}  # bounds of their neighbours; arm2c reads ARM only
     ends = starts[1:] + [a.base + len(code)]
     funcs, reasons = [], {}
     for s, e in zip(starts, ends):
+        if s in thumb:
+            reasons["thumb"] = reasons.get("thumb", 0) + 1
+            continue
         try:
             c, size = arm2c.translate(code, a.base, s, min(e, s + 0x400), "f_%08X" % s)
             funcs.append((s, c, size))
