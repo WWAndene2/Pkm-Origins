@@ -110,7 +110,42 @@ built so that something runs early and grows (§2).
 - Not checked: how the N64 recompilation projects ship their releases; the above follows from CLAUDE.md §1, not from
   their example.
 
-## 8. Next actions
+## 8. Mali target (owner's request, 4 November; a design, nothing built or measured yet)
+
+The owner's phone, the first test device: Xiaomi 13T (MediaTek Dimensity 8200-Ultra: 4 Cortex-A78 + 4 Cortex-A55;
+Mali-G610 MC6, driver r54p1, Vulkan 1.3). Source of what is known about it: Pomegrade's `docs/Eden_Optimisation_Xiaomi.md`
+(the Switch core's study on that phone, measured there). What carries over, since here the game is native code and the
+renderer ours, with none of an emulator's costs (decoding the console's GPU commands, tracking guest memory):
+- **CPU.** The game's C compiled on the phone for its own cores (`-mcpu=cortex-a78`, and the A55 tuning where both run);
+  the game's threads on the large cores, Android's performance hints (ADPF) for them: Pomegrade's O1-O3, measured on
+  the 13T with Eden (that study, §5.1).
+- **A tiler's rules for the renderer.** Mali draws the screen tile by tile in on-chip memory; its limit is memory
+  bandwidth (shared with the CPU), not shader power. So: render passes that never load or store what they need not
+  (load / store ops: clear or don't-care, transient attachments for depth), the 3DS's two screens and their effects in
+  as few passes as possible (subpasses rather than full-screen passes that read the image back), no readback of a frame
+  in progress, and never the CPU waiting on the GPU in a frame (Eden's main fault there: `Scheduler::Finish` in hot
+  paths, that study §2.4).
+- **Shaders.** The PICA200's shaders translated to SPIR-V once, when the game is compiled on the phone, and the
+  pipelines built then and cached (with the driver's pipeline cache): no compile stutter in play.
+- **Textures.** ASTC is native on Mali: a replacement pack (§7) in ASTC is read as is; the game's own formats are
+  converted once.
+- **Headroom (estimated, not measured).** The 3DS draws 400 x 240 (top) and 320 x 240 (bottom), with few polygons by
+  a phone's standards: even at 4 times the resolution the G610 should have a wide margin. To be measured on the phone
+  once the title screen draws (step 4).
+
+**"Mali Boost" profile (owner's request: everything at maximum on the Mali).** An option, the faithful look staying the
+default (CLAUDE.md §2), chosen for what a tiler does cheaply:
+- internal resolution up to the screen's (the 13T's 2712 x 1220), or a fixed multiple of the 3DS's;
+- MSAA 4x: resolved inside the tile on Mali, nearly free in bandwidth (unlike on desktop GPUs), so preferred over post
+  anti-aliasing passes;
+- anisotropic filtering 16x, higher-detail textures from a replacement pack (ASTC);
+- 60 fps with the game's logic kept at its own rate (interpolated animation: `docs/FEATURE_IDEAS.md`, technical ideas);
+- dynamic shadows, ambient occlusion, bloom only where they fit inside the tile pass; each effect a separate switch, so
+  a slower phone turns off what costs most.
+What the 13T sustains in each setting (heat, frame time over 30 minutes, as Pomegrade's study measured Eden) is to be
+measured, not assumed.
+
+## 9. Next actions
 
 1. Repository created and set up (4 November).
 2. Step 1 (loader): done. Step 2's hard part measured (§6).

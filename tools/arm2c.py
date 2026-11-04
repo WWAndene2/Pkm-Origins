@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The translator, ARM to C, mechanically (steps 3 and 5 of docs/RECOMPILATION_PLAN.md §8): integer instructions, the
+"""The translator, ARM to C, mechanically (steps 3 and 5 of docs/RECOMPILATION_PLAN.md §9): integer instructions, the
 stack (push / pop, ldm / stm, writeback addressing) and direct calls and tail calls to other translated functions.
 Each instruction becomes C on a register file and the flags; branches inside the function become gotos; literal pool
 loads become constants. Anything outside this subset makes the function "unsupported" (returned as None, with the reason),

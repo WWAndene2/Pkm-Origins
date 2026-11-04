@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The function list of the CRO modules (step 4 of docs/RECOMPILATION_PLAN.md §8), as function_list.py does for the .code:
+"""The function list of the CRO modules (step 4 of docs/RECOMPILATION_PLAN.md §9), as function_list.py does for the .code:
 every module's code segment split into functions, so the shared count covers the modules too.
 
   cro_functions.py <cro dir> <out.tsv>
