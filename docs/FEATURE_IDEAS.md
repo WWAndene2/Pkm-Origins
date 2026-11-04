@@ -131,6 +131,7 @@ supprime librement.
 
 ## Idées originales
 - [ ] Pokémon à leur vraie taille (la taille du Pokédex) sur le terrain et en combat, en option : Wailord immense, Joliflor minuscule ; caméra de combat qui s'adapte
+  - Existant (recherche du 4 novembre, non testé) : fil GBAtemp « Hacking Pokémon XY/ORAS – Play with Pokémon at Their Real Sizes » (gbatemp.net/posts/10847020/) : le code lit la taille de combat par défaut du Pokémon et règle l'échelle du modèle sur le rapport avec sa vraie taille ; testé seulement sur Citra, Wailord trop grand pour l'écran. Mod « True Pokemon Scale » pour Diamant Étincelant / Perle Scintillante (aussi la vitesse de marche), avec un correctif de caméra pour les grands Pokémon.
 - [ ] Combats sous-marins : en Plongée (Hoenn), combats dans l'eau avec ses propres règles (types Eau favorisés, attaques de Feu affaiblies, déplacement en 3D)
 - [ ] Pokémon qui ont une mémoire : ils se souviennent des combats, des lieux, du dresseur d'origine, et réagissent en conséquence
 - [ ] Pokémon sauvages qui évoluent avec la progression du jeu (badges, étapes de l'histoire) : une route revisitée plus tard a des formes plus évoluées et des niveaux plus hauts
