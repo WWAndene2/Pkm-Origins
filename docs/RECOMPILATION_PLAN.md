@@ -63,13 +63,22 @@ built so that something runs early and grows (§2).
 
 - Legal: the repository must stay free of game data (CLAUDE.md §1); the player supplies the games. Keeping the repository
   private until the owner decides otherwise.
-- Translating ARM to C statically needs every jump target known: indirect jumps (vtables, function pointers, the CROs'
-  imports) are the hard part; not measured yet on these games.
+- Translating ARM to C statically needs every jump target known. Measured 4 November (`tools/indirect_census.py`, upper
+  bounds: data decoding as instructions counts too), Omega Ruby / X .code: 66,121 / 62,592 direct calls; 9,395 / 9,283
+  indirect calls (`blx rN`: C++ virtual calls, function pointers); 1,883 / 1,843 indirect jumps (`bx rN` 1,161 in both,
+  `ldr pc` 360 / 323, `mov pc` 213, `add pc` 140: switch tables, pointer tail calls). The calls are handled the way the
+  N64 recompilations do it: every function entry (Ghidra finds about 47,750 in Omega Ruby) in a lookup table, an indirect
+  call looking its target up there (inferred to suffice, not built yet). The jumps need each switch table's bounds read
+  (the `add pc` / `ldr pc` ones) or the same lookup. The CROs' imports are resolved at load, as the game's loader does;
+  not measured yet. The identical counts of `bx rN`, `mov pc` and `add pc` in the two games suggest shared library code
+  (inferred).
 - The GPU: PICA200 shaders must be translated; Azahar's renderer is the reference (GPL-2.0: reading it to understand is
   fine, copying code brings its licence; to decide with the owner before any copy).
 - Performance on mid-range phones: not measured.
 
 ## 7. Next actions
 
-1. The owner creates the empty repository (`pkm-origins`, private) and adds it to the session; this skeleton is pushed.
-2. Step 1 (loader), then a measurement of step 2's hard part: how many indirect jumps the .code has.
+1. Repository created and set up (4 November).
+2. Step 1 (loader): done. Step 2's hard part measured (§6).
+3. Next: the translator's first slice: the function list (from Ghidra or our own sweep of `bl` targets and vtables),
+   then one leaf function translated to C and compared with the original run in Azahar (§4).
