@@ -289,3 +289,15 @@ Performance comes first in every design choice, the more so for the seamless co-
    `src/hos/` from the list above (begun: Memory.c, Kernel.c, Thread.c, Sync.c: the handles, the scheduler, the waits,
    events, mutexes, semaphores, timers and the address arbiter as Azahar has them; tools/svc_abi.py gives each system
    call's registers from Azahar's declarations).
+6. **Steps 2 and 3 done (4 November).** The CRO linker in C (`src/hos/Cro.c`, as Azahar's ldr:ro LoadCRO): rebase,
+   relocations, imports and exports; checked word for word against the modules Azahar loaded (`tools/cro_check.c`: 0
+   words differ), and all modules linked together (`tools/cro_link.c`: 145 in Omega Ruby, 133 in X, 0 failed). Final
+   check (200 trials for the .code, 100 for the linked modules; each trial's FPSCR either the kernel's or the game's,
+   0x03000000): Omega Ruby .code 26,177 translated, 19,965 matched, **0 mismatched**; X .code 25,422, 19,061, **0**;
+   Omega Ruby linked modules 42,169, 25,531, **0**; X's 38,684, 22,913, **0**. Not checked: the functions with no valid
+   trial (6,212, 6,361, 16,638, 15,771), mostly ones random inputs never run to the end (inferred, not measured).
+   Step 3: `src/hos/` (kernel, threads, loader, IPC, srv, APT, ndm, cfg, ptm, frd, boss, fs (RomFS), hid, gsp with a
+   null GPU) runs Omega Ruby's translated code natively (`game <extracted dir> <.3ds>`) to its **first GPU command list**
+   (29,824 bytes submitted); its main thread's first 388 system calls equal Azahar's, in order
+   (`tools/hos_trace_compare.py`). It then asks for dsp::DSP (step 5). Not done: X run the same way; input; speed not
+   measured (it can be once the title screen draws, step 4). Step 4 (the renderer) waits for the owner's discussion.
