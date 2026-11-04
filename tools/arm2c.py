@@ -675,15 +675,14 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
 
     def jump(expr):
         """a computed jump (add pc, ... / mov pc, rN / ldr pc, ...): to any instruction of this function by a switch
-        on the target, else out of it as a tail call through call_indirect (lr checked as at a return)"""
+        on the target, else out of it as a tail call through call_indirect"""
         if thumb:
             raise Unsupported("computed jump in Thumb")
         computed.append(True)
         # (the cases: every instruction translated, filled in once the function is: code past its last return, which
         # only such a jump could reach, is not decoded, as data may follow; a jump there is a tail call through
         # call_indirect, which faults (4) when nothing is translated there)
-        return ("{ uint32_t t = %s; switch (t - %s) { @CASES@ default: break; } if (c->r[14] != ret) { c->fault = 3;"
-                " return; } call_indirect(c, t, ret); return; }" % (expr, ADDR(0)))
+        return ("{ uint32_t t = %s; switch (t - %s) { @CASES@ default: break; } call_indirect(c, t, ret); return; }" % (expr, ADDR(0)))
     body, targets, returned = [], set(), False
     unsupported = []  # the instructions with no C (a stop each)
     for i in insns:
@@ -727,8 +726,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 line.append("if (c->r[14] != ret) { c->fault = 3; return; } return;")
                 returned = i.cc in (0, 15)
             elif base_m == "bx" and ops[0].type == ARM_OP_REG:  # a jump through a register: the function it lands in returns
-                line.append("{ uint32_t t = c->r[%d]; if (c->r[14] != ret) { c->fault = 3; return; } call_indirect(c, t, ret); "
-                            "return; }" % rd())  # for this one (lr checked as at bx lr)
+                line.append("{ uint32_t t = c->r[%d]; call_indirect(c, t, ret); "
+                            "return; }" % rd())  # for this one
                 returned = i.cc in (0, 15)
             elif base_m == "blx" and ops[0].type == ARM_OP_REG:  # an indirect call (virtual methods, function pointers)
                 lr = (i.address + i.size) | thumb
@@ -756,8 +755,10 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                     if not is_start(t, thumb):
                         entries.add(t)
                     callees.add(t)
-                    # (it returns where this one would, to lr: so lr must be that address, as at bx lr)
-                    line.append("if (c->r[14] != ret) { c->fault = 3; return; } %s(c, ret); return;" % fname(t, module))
+                    # (a jump, not a call: lr is whatever it holds, often the return address of the last call made, as
+                    # when a function jumps to an epilogue it shares; the return address is checked where the code
+                    # actually returns, at its bx lr or pop {pc})
+                    line.append("%s(c, ret); return;" % fname(t, module))
                     returned = i.cc in (0, 15)
                 else:
                     raise Unsupported("branch out of the function to no function start")
@@ -769,7 +770,11 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                     b, regs, wb = REG[i.reg_name(ops[0].reg)], [REG[i.reg_name(o.reg)] for o in ops[1:]], i.writeback
                 if any(re.match(r"[sd]\d+$", i.reg_name(o.reg)) for o in ops):
                     raise Unsupported("instruction v%s" % base_m)
-                if b == 15 or wb and b in regs or "^" in i.op_str or not load and 15 in regs or load and 13 in regs:
+                # (a store with writeback whose base is in the list stores the base's old value when it is the lowest
+                # register listed, ARM's one defined case: the C stores before it writes the base back)
+                stm_base_lowest = not load and wb and b in regs and b == min(regs)
+                if b == 15 or wb and b in regs and not stm_base_lowest or "^" in i.op_str or not load and 15 in regs \
+                        or load and 13 in regs:
                     raise Unsupported("ldm / stm form")
                 n = len(regs)
                 first = {"ia": "", "ib": " + 4u", "da": " - %du" % (4 * n - 4), "db": " - %du" % (4 * n)}[mode]
@@ -1091,7 +1096,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         elif is_start(end_code, thumb) and not (last is not None and last.mnemonic == "b"):
             # it falls into the function placed after it (a tail call by placement: pop {r4, lr} then the next one)
             callees.add(end_code)
-            body.append((last.address, "    /* falls into %08X */ if (c->r[14] != ret) { c->fault = 3; return; } "
+            body.append((last.address, "    /* falls into %08X */ "
                                        "%s(c, ret); return;" % (end_code, fname(end_code, module))))
         elif last is not None and last.cc in (0, 15) and last.mnemonic in ("bl", "blx"):
             # its last instruction calls a function that does not return (abort, a fatal error): should it return, the
@@ -1114,6 +1119,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         cases = " ".join("case 0x%Xu: goto L%X;" % (x, x) for x in done)
         body = [(a, s.replace("@CASES@", cases)) for a, s in body]
         targets.update(done)
+    # (a return-address fault records where it happened: r15 the instruction's address)
+    body = [(a, s.replace("c->fault = 3;", "c->r[15] = %s; c->fault = 3;" % ADDR(a))) for a, s in body]
     labelled = set()
     for a, s in body:
         if a in targets and a not in labelled:  # (once: a line added after an instruction carries its address too)

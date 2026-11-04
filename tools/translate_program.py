@@ -18,14 +18,17 @@ TRANSLATE = None  # (code, base, sizes, ARM starts, Thumb starts, relocated word
 
 
 def translate_one(s, end=None, is_thumb=None):
-    """(s, ((C, size), callees)), or (s, the reason it is not translated). end and is_thumb: an entry inside a function
-    (a branch's target there), translated to that function's end in its instruction set"""
+    """(s, ((C, size), callees, {entry: its instruction set})), or (s, the reason it is not translated). end and
+    is_thumb: an entry inside a function (a branch's target there), translated to that function's end in the
+    instruction set of the branch that reaches it (a b never changes it: Omega Ruby's ARM veneer at 00100184 sits in
+    the range of the Thumb function before it)"""
     code, base, size, arm, thumb, relocated, module = TRANSLATE
     try:
-        callees = set()
+        callees, entries = set(), set()
+        isa = s in thumb if is_thumb is None else is_thumb
         c = arm2c.translate(code, base, s, end or s + min(size[s] or 0x400, arm2c.MAX_FUNCTION), arm2c.fname(s, module), arm,
-                            callees, relocated, s in thumb if is_thumb is None else is_thumb, thumb, set(), module)
-        return s, (c, callees)
+                            callees, relocated, isa, thumb, entries, module)
+        return s, (c, callees, {e: isa for e in entries})
     except arm2c.Unsupported as x:
         return s, "instruction " + str(x).split()[1] if str(x).startswith("instruction") else str(x)
 
@@ -41,13 +44,16 @@ def translate_program(code, base, starts, size, thumb, relocated, module=None, j
     with multiprocessing.get_context("fork").Pool(jobs) as pool_:
         done = pool_.map(translate_one, starts, chunksize=256)
     why = {}  # each refused function's own reason
+    entry_isa = {}  # each entry's instruction set: that of the branches reaching it
     for s, got in done:
         if isinstance(got, str):
             reasons[got] = reasons.get(got, 0) + 1
             why[s] = got
         else:
-            (c, n), callees = got
+            (c, n), callees, ents = got
             funcs[s], deps[s] = (c, n), callees
+            for e, isa in ents.items():
+                entry_isa.setdefault(e, isa)
     # the entries inside functions their branches reach (shared tails), translated as functions of their own, from
     # there to the end of the function holding them, until none is new (an entry's code may branch into another)
     entry_thumb = set()
@@ -64,15 +70,25 @@ def translate_program(code, base, starts, size, thumb, relocated, module=None, j
                 continue
             # past the end of the function before it (code the function list's walk did not reach): to the next start
             nxt = starts[k + 1] if k + 1 < len(starts) else f + (size[f] or 0)
-            end = f + min(size[f] or 0, arm2c.MAX_FUNCTION) if t < f + (size[f] or 0) else min(nxt, t + arm2c.MAX_FUNCTION)
-            _, got = translate_one(t, end, f in thumb)
+            # (to the next start: the function holding the entry ends there at the latest; its own size, as the walk
+            # measured it, can stop short of code only branches reach, as the veneer's bx ip at 00100188)
+            code_end = base + len(code)
+            if t >= code_end or nxt <= t:  # (past the last function: nothing listed holds it)
+                why[t] = "branch to no function's code"
+                reasons[why[t]] = reasons.get(why[t], 0) + 1
+                continue
+            end = min(nxt, t + arm2c.MAX_FUNCTION, code_end)
+            isa = entry_isa.get(t, f in thumb)
+            _, got = translate_one(t, end, isa)
             if isinstance(got, str):
                 why[t] = got
                 reasons["(entry) " + got] = reasons.get("(entry) " + got, 0) + 1
             else:
-                (c, n), callees = got
+                (c, n), callees, ents = got
                 funcs[t], deps[t] = (c, n), callees
-                if f in thumb:
+                for e, eisa in ents.items():
+                    entry_isa.setdefault(e, eisa)
+                if isa:
                     entry_thumb.add(t)
 
     return funcs, deps, why, reasons, entry_thumb

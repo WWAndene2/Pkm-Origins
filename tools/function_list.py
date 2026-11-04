@@ -81,6 +81,16 @@ def main():
             if half(w - 1) >> 8 == 0xB5 and thumb_valid(half, w - 1, text_end):  # that reads as Thumb (Omega Ruby's
                 pointers.add(w - 1)  # 0020FD3C is an ARM bl, 0xEB00xxxx, whose low half reads as a push)
                 pointer_thumb.add(w - 1)
+    # Tables of relative pointers (the static constructors' init array: each entry an offset from its own address), read
+    # from the loop that walks them: two addresses made pc-relative (Thumb ldr rN, [pc, #k] then add rN, pc; ARM
+    # ldr rN, [pc, #k] then add rN, pc, rN) bound the table, and every entry must land in the text (Omega Ruby's
+    # 00102F0C walks 227, one of them, 005001BC, found by nothing else, 4 November)
+    for start_, end_, targets in relative_tables(data, a.base, text_end):
+        for t in targets:
+            pointers.add(t & ~1)
+            if t & 1:
+                pointer_thumb.add(t & ~1)
+        print("relative pointer table %08X-%08X: %d entries" % (start_, end_, len(targets)))
     # The list grows from sure starts (the entry point, pointers, imports): each round walks them with the calls of the
     # round before, then takes the targets of the bl / blx found in the code walked, until those are the same twice. A
     # "bl" counted anywhere (data placed in the text, Thumb code read as ARM) made false starts: 16 in Omega Ruby.
@@ -131,6 +141,49 @@ def main():
           % (len(kinds), len(calls), len(pointers - set(calls)), len(imported - set(calls) - pointers),
              len(set(kinds) - set(calls) - pointers - imported)))
     print("%d of them Thumb" % len(thumb & set(kinds)))
+
+
+def relative_tables(data, base, text_end):
+    """[(start, end, targets)]: the tables of relative pointers a loop walks (see main); the addresses a pc-relative
+    pair names, the earlier as the table's start, the later its end, within 64 KiB of each other in the read-only data
+    or data, every entry (its address + its value) inside the text"""
+    word = lambda x: struct.unpack_from("<I", data, x - base)[0]
+    end = base + len(data)
+    found = []
+    seen = set()
+    for a in range(base, text_end - 8, 2):  # Thumb: ldr rN, [pc, #k] (0x48..) then add rN, pc (0x4478 | N)
+        h = struct.unpack_from("<H", data, a - base)[0]
+        if h >> 11 != 0x09:
+            continue
+        n = (h >> 8) & 7
+        values = []
+        for b in (a + 2, a + 4):
+            if struct.unpack_from("<H", data, b - base)[0] == 0x4478 | n:
+                lit = ((a + 4) & ~3) + (h & 0xFF) * 4
+                if base <= lit < end - 3:
+                    values.append(((word(lit) + b + 4) & 0xFFFFFFFF))
+                break
+        if not values:
+            continue
+        # the second address of the pair: the next such idiom within 8 bytes
+        for a2 in range(a + 2, a + 10, 2):
+            h2 = struct.unpack_from("<H", data, a2 - base)[0]
+            if h2 >> 11 != 0x09:
+                continue
+            n2 = (h2 >> 8) & 7
+            for b2 in (a2 + 2, a2 + 4):
+                if struct.unpack_from("<H", data, b2 - base)[0] == 0x4478 | n2:
+                    lit2 = ((a2 + 4) & ~3) + (h2 & 0xFF) * 4
+                    if base <= lit2 < end - 3:
+                        lo, hi = values[0], (word(lit2) + b2 + 4) & 0xFFFFFFFF
+                        if text_end <= lo < hi <= end and hi - lo <= 0x10000 and (hi - lo) % 4 == 0 and \
+                                (lo, hi) not in seen:
+                            targets = [(e + word(e)) & 0xFFFFFFFF for e in range(lo, hi, 4)]
+                            if all(base <= t & ~1 < text_end for t in targets):
+                                seen.add((lo, hi))
+                                found.append((lo, hi, targets))
+                    break
+    return found
 
 
 def cro_imports(cro_dir, base, end):
