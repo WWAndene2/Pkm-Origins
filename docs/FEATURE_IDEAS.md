@@ -175,6 +175,31 @@ supprime librement.
 - [ ] API de scripts pour les mods (Lua ou similaire), au-dessus du code fidèle, sans le modifier
 - [ ] Format de sauvegarde ouvert et documenté, avec convertisseur depuis et vers la 3DS
 
+## Demandées par les joueurs en ligne (recherche du 4 novembre ; forums et articles, un échantillon, pas un classement)
+- [ ] Maison personnalisable où l'on se détend avec ses Pokémon, qui s'y promènent librement (Reddit, via player.one)
+- [ ] Retour des Bases Secrètes (Reddit, via player.one)
+- [ ] Plus de légendaires exclusifs à une version : tous capturables dans un seul jeu (Reddit, via GamePro)
+- [ ] Pokédex enrichi : évolutions possibles et attaques apprenables affichées (fil Reddit de 900+ commentaires, via GamePro)
+- [ ] Retour du Poké Navigateur (via GamePro)
+- [ ] Choisir le Pokémon de tête sans ouvrir le menu (Nintendo Life)
+- [ ] Faire évoluer manuellement depuis le menu (Nintendo Life)
+- [ ] Multi Exp. désactivable (Nintendo Life)
+- [ ] Réglage de difficulté ou mode Défi (Nintendo Life)
+- [ ] Cachettes / Trouées cachées de Noir / Blanc (TheGamer)
+- [ ] Pokémon des boîtes visibles en liberté, façon Pokémon Pelago (PokéCommunity)
+- [ ] Retour de Pokémon-Récré (Amie) et du Poké Radar (articles sur les fonctions disparues)
+- [ ] Câble de Liaison de Légendes Arceus : évolutions par échange sans échanger (Dexerto)
+- [ ] Passer les animations d'évolution, évolutions en série (demandes Pokémon GO)
+
+Sources : player.one/pokemon-fans-want-customizable-homes-secret-bases-better-camping-features-winds-waves-163468,
+gamepro.de/artikel/pokemon-karmesin-purpur-ungewollte-features,3379567.html,
+gamepro.de/artikel/pokemon-fans-enttaeuscht-pokedex-features,3369867.html,
+nintendolife.com/forums/nintendo-switch-2/next_pokemon_game_hopes_and_wishes?start=20,
+thegamer.com/pokemon-video-games-things-deleted-fans-want/,
+pokecommunity.com/threads/what-features-from-each-generation-would-you-like-to-see-return.464790,
+jamtest.dexerto.com/pokemon/pokemon-legends-z-a-needs-to-use-these-arceus-features-according-to-fans-2842309,
+pockettactics.com/pokemon-go/quality-of-life-improvements
+
 ## Création et mods
 - [ ] Éditeur intégré (cartes, dresseurs, scripts) avec rechargement à chaud
 - [ ] Mods en paquets, installation en un clic
