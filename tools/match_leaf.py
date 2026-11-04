@@ -34,7 +34,7 @@ PRELUDE = r"""
 #include <string.h>
 typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; } Cpu;
 static uint8_t* M; static uint32_t MBASE, MSIZE;
-static int ok(Cpu* c, uint32_t a, uint32_t n) { if (a < MBASE || a + n > MBASE + MSIZE || a % n) { c->fault = 1; return 0; } return 1; }
+static int ok(Cpu* c, uint32_t a, uint32_t n) { if (a - MBASE > MSIZE - n || a % n) /* unsigned: an address near 0xFFFFFFFF cannot wrap past the check */ { c->fault = 1; return 0; } return 1; }
 static uint32_t ld32(Cpu* c, uint32_t a) { uint32_t v = 0; if (ok(c, a, 4)) memcpy(&v, M + a - MBASE, 4); return v; }
 static uint32_t ld16(Cpu* c, uint32_t a) { uint16_t v = 0; if (ok(c, a, 2)) memcpy(&v, M + a - MBASE, 2); return v; }
 static uint32_t ld8(Cpu* c, uint32_t a) { return ok(c, a, 1) ? M[a - MBASE] : 0; }

@@ -80,5 +80,12 @@ built so that something runs early and grows (§2).
 
 1. Repository created and set up (4 November).
 2. Step 1 (loader): done. Step 2's hard part measured (§6).
-3. Next: the translator's first slice: the function list (from Ghidra or our own sweep of `bl` targets and vtables),
-   then one leaf function translated to C and compared with the original run in Azahar (§4).
+3. Step 3, the translator's first slice (4 November): our own function list (`tools/function_list.py`, `symbols/`:
+   15,617 entries in Omega Ruby, 15,072 in X, incomplete against Ghidra's 47,750); `tools/arm2c.py` translates leaf
+   functions (no call, no stack, integer only) to C; `tools/match_leaf.py` runs each against the original instructions in
+   Unicorn on random registers and memory, 20 trials each. Omega Ruby: 1,111 translated, **782 matched, 0 mismatched**,
+   329 untestable (they read fixed global addresses outside the test memory). X: 1,062 translated, **723 matched, 0
+   mismatched**, 339 untestable. Not translated, first reason: push (a stack frame: 12,119 in Omega Ruby), tail calls
+   (362), writeback addressing (339), loads to pc (338), VFP (vldr 144, vldmia 67).
+4. Next: the stack (push/pop, writeback, ldm/stm) and calls between translated functions (the lookup table of §6), which
+   opens most of the code; then VFP; the untestable functions given the game's real memory (a RAM dump from Azahar).
