@@ -84,6 +84,8 @@ def main():
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--base", type=lambda s: int(s, 0), default=0x100000)
     p.add_argument("--keep")
+    p.add_argument("--cro", help="the game's modules (static.crs): the words of the program they rewrite are read when run")
+    p.add_argument("--only", type=lambda v: int(v, 16), help="test this function only (and what it calls)")
     p.add_argument("--ram", help="a folder of the game's memory (code.bin, heap.bin, linear.bin, stack.bin) under the tests")
     a = p.parse_args()
     code = open(a.code, "rb").read()
@@ -92,6 +94,7 @@ def main():
     thumb = {int(r[0], 16) for r in rows if r[3] == "thumb"}  # bounds of their neighbours; arm2c reads ARM only
     size = {int(r[0], 16): int(r[4]) for r in rows}
     arm = frozenset(x for x in starts if x not in thumb)
+    relocated = arm2c.static_relocations(a.cro) if a.cro else frozenset()
     funcs, reasons, deps = {}, {}, {}
     for s in starts:
         if s in thumb:
@@ -99,7 +102,7 @@ def main():
             continue
         try:
             callees = set()
-            c, n = arm2c.translate(code, a.base, s, s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees)
+            c, n = arm2c.translate(code, a.base, s, s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees, relocated)
             funcs[s], deps[s] = (c, n), callees
         except arm2c.Unsupported as x:
             k = str(x).split(" ")[0] if str(x).startswith("instruction") else str(x)
@@ -113,8 +116,8 @@ def main():
         for s in drop:
             del funcs[s]
             reasons["calls an untranslated function"] = reasons.get("calls an untranslated function", 0) + 1
-    if a.limit:  # the first N, and every function they call (directly or not)
-        keep, todo = set(), sorted(funcs)[:a.limit]
+    if a.limit or a.only:  # the first N (or the one asked), and every function they call (directly or not)
+        keep, todo = set(), [a.only] if a.only else sorted(funcs)[:a.limit]
         while todo:
             k = todo.pop()
             if k not in keep:
@@ -233,7 +236,8 @@ def main():
                     uc.mem_write(x, bytes([original_byte(x)]))
                 break
             # the game's memory: every byte either side wrote, compared, then both put back as the dump holds it
-            diff = [x for x in sorted(c_wrote | written) if so.where(x)[0] != bytes(uc.mem_read(x, 1))[0]]
+            diff = [(x, bytes(uc.mem_read(x, 1))[0], so.where(x)[0], original_byte(x)) for x in sorted(c_wrote | written)
+                    if so.where(x)[0] != bytes(uc.mem_read(x, 1))[0]]
             so.undo()
             for x in written:
                 uc.mem_write(x, bytes([original_byte(x)]))
@@ -253,7 +257,7 @@ def main():
             elif bytes(uc.mem_read(MB, MS)) != cmem.raw:
                 bad = "memory"
             elif diff:
-                bad = "the game's memory at %s" % ", ".join("%08X" % x for x in diff[:3])
+                bad = "the game's memory at %s" % ", ".join("%08X (arm %02X, c %02X, before %02X)" % d for d in diff[:3])
             if bad:
                 break
         if bad:

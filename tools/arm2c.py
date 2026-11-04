@@ -93,26 +93,52 @@ MULTI = {"push": ("db", True, False), "pop": ("ia", True, True),
          "ldm": ("ia", None, True), "ldmib": ("ib", None, True), "ldmda": ("da", None, True), "ldmdb": ("db", None, True)}
 
 
-def translate(code, base, start, end, name, starts=frozenset(), callees=None):
+def static_relocations(cro_dir):
+    """the words of the .code the loader rewrites when it links the modules: static.crs's external relocations (the
+    imports of the program from the modules; Omega Ruby: 367 in the text, measured 4 November)"""
+    import cro_functions
+    static = cro_functions.Module(os.path.join(cro_dir, "static.crs"))
+    out = set()
+    for k in range(static.h["ExternalRelocationNum"]):
+        tag = struct.unpack_from("<I", static.data, static.h["ExternalRelocationTableOffset"] + 12 * k)[0]
+        t = static.tag(tag)
+        if t is not None:
+            out.add(t)
+    return frozenset(out)
+
+
+def translate(code, base, start, end, name, starts=frozenset(), callees=None, relocated=frozenset()):
     """the C of the function at start (to end at most), or Unsupported. starts: the function list, for calls and tail
-    calls (b to a start); callees, when given, receives the functions it calls (they must be translated too)."""
+    calls (b to a start); callees, when given, receives the functions it calls (they must be translated too);
+    relocated: the words of the program the module loader rewrites (static_relocations), read from memory when run."""
     callees = set() if callees is None else callees
     md = Cs(CS_ARCH_ARM, CS_MODE_ARM)
     md.detail = True
     word = lambda a: struct.unpack_from("<I", code, a - base)[0]
     # the words inside the function that are data, never decoded: what its pc-relative loads read (literal pools,
     # between its code too), and the address tables of its switches (ldr pc, [pc, rN, lsl #2] and the words after it)
+    # (only the loads of words that are code themselves count: a pool word read as an instruction can look like a
+    # pc-relative ldrd and mark two real instructions as data, as in Omega Ruby's 004FBF20; repeated until it settles)
     data, switches = set(), {}
-    for a in range(start, end, 4):
-        w = word(a)
-        data.update(function_list.pc_relative_words(w, a))
-        if w >> 28 != 0xF and (w & 0x0F7FF000) == 0x071FF000 and (w & 0xFF0) == 0x100:  # ldr pc, [pc, rN, lsl #2]
-            table, b = [], a + 8
-            while b < end and start <= word(b) < end and word(b) % 4 == 0:
-                table.append(word(b))
-                data.add(b)
-                b += 4
-            switches[a] = table
+    for _ in range(16):
+        new, sw = set(), {}
+        for a in range(start, end, 4):
+            if a in data:
+                continue
+            w = word(a)
+            new.update(function_list.pc_relative_words(w, a))
+            if w >> 28 != 0xF and (w & 0x0F7FF000) == 0x071FF000 and (w & 0xFF0) == 0x100:  # ldr pc, [pc, rN, lsl #2]
+                table, b = [], a + 8
+                while b < end and start <= word(b) < end and word(b) % 4 == 0:
+                    table.append(word(b))
+                    new.add(b)
+                    b += 4
+                sw[a] = table
+        if new == data:
+            break
+        data, switches = new, sw
+    else:
+        raise Unsupported("its data words do not settle")
     insns = []
     for a in range(start, end, 4):
         if a in data:
@@ -347,7 +373,11 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None):
             if basereg == "pc":
                 if base_m != "ldr":
                     raise Unsupported("pc-relative non-word access")
-                line.append("c->r[%d] = 0x%Xu;" % (rd(), word(i.address + 8 + mem.mem.disp)))
+                t = i.address + 8 + mem.mem.disp
+                if t in relocated:  # a word the module loader rewrites (an import): its value only exists when run
+                    line.append("c->r[%d] = ld32(c, 0x%Xu);" % (rd(), t))
+                else:
+                    line.append("c->r[%d] = 0x%Xu;" % (rd(), word(t)))
             else:
                 addr = "c->r[%d]" % REG[basereg]
                 if mem.mem.index:
