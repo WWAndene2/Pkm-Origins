@@ -21,7 +21,8 @@ import tempfile
 from unicorn import UC_ARCH_ARM, UC_MODE_ARM, Uc, UcError
 from unicorn.arm_const import (UC_ARM_REG_CPSR, UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
                                UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_R8,
-                               UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12, UC_ARM_REG_SP)
+                               UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12, UC_ARM_REG_SP,
+                               UC_ARM_REG_PC)
 
 import arm2c
 
@@ -123,6 +124,11 @@ def main():
             except UcError as e:
                 bad = "unicorn: %s" % e
                 break
+            if uc.reg_read(UC_ARM_REG_PC) != RET:
+                # Unicorn's instruction count ran out before the return (a long loop: X's 002A54A0 on a random length
+                # read ~20,000 elements, 4 November); C's own cap counts blocks and went further: no result to compare
+                valid -= 1
+                continue
             ur = [uc.reg_read(r) for r in REGS]
             cp = uc.reg_read(UC_ARM_REG_CPSR) >> 28
             cr = [cpu.r[k] for k in range(13)]
