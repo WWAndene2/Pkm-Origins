@@ -6,7 +6,7 @@ memory, the stack inside it, over the game's own memory from a running game with
 sides, compared, then undone); a function matches when registers r0-r12 and sp, the flags, the VFP registers and FPSCR's flags and the whole test memory are
 equal after every trial. Its calls run in both: the original callee in Unicorn, the translated one in C.
 
-  match_functions.py <code.bin> <functions.tsv> [--trials 200] [--limit N] [--base 0x100000] [--keep DIR]
+  match_functions.py <code.bin> <functions.tsv> [--trials 200] [--limit N] [--base 0x100000] [--keep DIR] [--jobs N]
 
 Trials where the C stops on a fault (an access out of the 64 KiB test memory, or unaligned) are skipped, not counted as
 matches; a function with no valid trial is reported apart. --keep DIR writes the generated C there (outside the
@@ -14,6 +14,8 @@ repository: it holds the game's literal constants). Needs capstone, unicorn and 
 Unicorn stands in for Azahar here (same ARM instructions, no 3DS system); whole-game checks use Azahar (§4).
 """
 import argparse
+import json
+import multiprocessing
 import ctypes
 import os
 import random
@@ -84,6 +86,20 @@ void undo(void) { while (NL) { NL--; *where(LA[NL]) = LV[NL]; } }
 """
 
 
+TRANSLATE = None  # (code, base, sizes, ARM starts, relocated words), set before the translating processes fork
+
+
+def translate_one(s):
+    """(s, ((C, size), callees)), or (s, the reason it is not translated)"""
+    code, base, size, arm, relocated = TRANSLATE
+    try:
+        callees = set()
+        c = arm2c.translate(code, base, s, s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees, relocated)
+        return s, (c, callees)
+    except arm2c.Unsupported as x:
+        return s, "instruction " + str(x).split()[1] if str(x).startswith("instruction") else str(x)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("code")
@@ -92,6 +108,7 @@ def main():
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--base", type=lambda s: int(s, 0), default=0x100000)
     p.add_argument("--keep")
+    p.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="processes running the trials (default: one per CPU)")
     p.add_argument("--cro", help="the game's modules (static.crs): the words of the program they rewrite are read when run")
     p.add_argument("--only", type=lambda v: int(v, 16), help="test this function only (and what it calls)")
     p.add_argument("--ram", help="a folder of the game's memory (code.bin, heap.bin, linear.bin, stack.bin) under the tests")
@@ -104,18 +121,19 @@ def main():
     arm = frozenset(x for x in starts if x not in thumb)
     relocated = arm2c.static_relocations(a.cro) if a.cro else frozenset()
     funcs, reasons, deps = {}, {}, {}
-    for s in starts:
-        if s in thumb:
-            reasons["thumb"] = reasons.get("thumb", 0) + 1
-            continue
-        try:
-            callees = set()
-            c, n = arm2c.translate(code, a.base, s, s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees, relocated)
+    global TRANSLATE
+    TRANSLATE = (code, a.base, size, arm, relocated)
+    with multiprocessing.get_context("fork").Pool(a.jobs) as pool_:  # translating is a third of a run: shared too
+        done = pool_.map(translate_one, [s for s in starts if s not in thumb], chunksize=256)
+    reasons["thumb"] = len(thumb & set(starts))
+    why = {s: "thumb" for s in thumb & set(starts)}  # each refused function's own reason
+    for s, got in done:
+        if isinstance(got, str):
+            reasons[got] = reasons.get(got, 0) + 1
+            why[s] = got
+        else:
+            (c, n), callees = got
             funcs[s], deps[s] = (c, n), callees
-        except arm2c.Unsupported as x:
-            k = str(x).split(" ")[0] if str(x).startswith("instruction") else str(x)
-            k = "instruction " + str(x).split()[1] if str(x).startswith("instruction") else k
-            reasons[k] = reasons.get(k, 0) + 1
     # a function whose callee is not translated is not either, until none is left
     while True:
         drop = [s for s in funcs if not deps[s] <= funcs.keys()]
@@ -124,6 +142,24 @@ def main():
         for s in drop:
             del funcs[s]
             reasons["calls an untranslated function"] = reasons.get("calls an untranslated function", 0) + 1
+    # what each refused function waits for: its own reason, or those of the refused functions under it (iterated to a
+    # fixed point: calls can loop); a reason's weight is the functions that wait for it alone, translated once it is
+    roots = {s: {why[s]} for s in why}
+    waiting = [s for s in deps if s not in funcs]
+    for s in waiting:
+        roots[s] = set()
+    changed = True
+    while changed:
+        changed = False
+        for s in waiting:
+            new = set().union(*(roots.get(t, set()) for t in deps[s] if t not in funcs)) | roots[s]
+            if new != roots[s]:
+                roots[s], changed = new, True
+    alone = {}
+    for r in roots.values():
+        if len(r) == 1:
+            k = next(iter(r))
+            alone[k] = alone.get(k, 0) + 1
     if a.limit or a.only:  # the first N (or the one asked), and every function they call (directly or not)
         keep, todo = set(), [a.only] if a.only else sorted(funcs)[:a.limit]
         while todo:
@@ -161,145 +197,182 @@ def main():
                     ("v", ctypes.c_uint32), ("fault", ctypes.c_int), ("steps", ctypes.c_uint32),
                     ("s", ctypes.c_uint32 * 32), ("fpscr", ctypes.c_uint32)]
 
-    uc = Uc(UC_ARCH_ARM, UC_MODE_ARM)
-    # the game's memory under the test, the same in both: the dump's regions (the program as it ran, its data and bss
-    # live, the modules loaded), or without --ram only the program as the cartridge holds it (for Unicorn to run)
-    regions = []
-    if a.ram:
-        for name, addr in RAM:
-            data = open(os.path.join(a.ram, name), "rb").read()
-            regions.append((addr, data))
-    else:
-        uc.mem_map(a.base, (len(code) + 0xFFF) & ~0xFFF)
-        uc.mem_write(a.base, code)
-    cbufs = [ctypes.create_string_buffer(d, len(d)) for _, d in regions]
-    for addr, d in regions:
-        uc.mem_map(addr, (len(d) + 0xFFF) & ~0xFFF)
-        uc.mem_write(addr, d)
-    LMAX = 1 << 22
-    la, lv = (ctypes.c_uint32 * LMAX)(), (ctypes.c_uint8 * LMAX)()
-    n = 1 + len(regions)
-    ptrs = (ctypes.c_void_p * n)(None, *[ctypes.addressof(b) for b in cbufs])
-    so.setup(n, ptrs, (ctypes.c_uint32 * n)(MB, *[r[0] for r in regions]),
-             (ctypes.c_uint32 * n)(MS, *[len(r[1]) for r in regions]), la, lv, LMAX)
-    so.where.restype = ctypes.POINTER(ctypes.c_uint8)
-    heap_pages = [addr + o for addr, d in regions if addr == 0x08000000 for o in range(0, len(d), 0x1000)
-                  if any(d[o:o + 0x1000])]
-    written = set()  # what Unicorn wrote in the game's memory this trial
+    # the random test memories: a pool made once (half the words point into the test memory, so pointer chains stay
+    # inside it), each trial taking one; drawing 16,384 words per trial was most of a run's time
+    prng = random.Random(4)
+    pool = []
+    for _ in range(64):
+        mem = bytearray(prng.randbytes(MS))
+        for o in range(0, MS, 4):
+            if prng.random() < 0.5:
+                mem[o:o + 4] = (MB + prng.randrange(0, MS - 0x400, 4)).to_bytes(4, "little")
+        pool.append(bytes(mem))
 
-    def on_write(uc_, access, address, size_, value, user):
-        written.update(range(address, address + size_))
-    for addr, d in regions:
-        uc.hook_add(UC_HOOK_MEM_WRITE, on_write, begin=addr, end=addr + len(d) - 1)
-
-    def original_byte(x):
+    def check(job, jobs):
+        """the trials of every jobs-th function from job: (matched, mismatched, no valid trial)"""
+        uc = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+        # the game's memory under the test, the same in both: the dump's regions (the program as it ran, its data and bss
+        # live, the modules loaded), or without --ram only the program as the cartridge holds it (for Unicorn to run)
+        regions = []
+        if a.ram:
+            for name, addr in RAM:
+                data = open(os.path.join(a.ram, name), "rb").read()
+                regions.append((addr, data))
+        else:
+            uc.mem_map(a.base, (len(code) + 0xFFF) & ~0xFFF)
+            uc.mem_write(a.base, code)
+        cbufs = [ctypes.create_string_buffer(d, len(d)) for _, d in regions]
         for addr, d in regions:
-            if addr <= x < addr + len(d):
-                return d[x - addr]
-    uc.mem_map(MB, MS)
-    uc.mem_map(RET, 0x1000)  # the return address holds "b .": Unicorn stops there (until) even when it reaches it mid-block
-    uc.mem_write(RET, bytes.fromhex("feffffea") * 1024)
-    rng = random.Random(4)
-    matched, mismatched, untested = 0, [], 0
-    for idx, (s, _, _) in enumerate(funcs):
-        valid, bad = 0, None
-        for _ in range(a.trials):
-            # each register: a pointer into the test memory, any value, a small number, or (--ram) an address in the
-            # game's used heap pages, where its objects are
-            choices = [lambda: MB + rng.randrange(0, MS // 2, 4), lambda: rng.getrandbits(32), lambda: rng.randrange(0, 64)]
-            if heap_pages:
-                choices.append(lambda: rng.choice(heap_pages) + rng.randrange(0, 0x1000, 4))
-            regs = [rng.choice(choices)() for _ in range(13)]
-            mem = bytearray(rng.randbytes(MS))
-            for o in range(0, MS, 4):  # half the words point into the test memory, so pointer chains stay inside it
-                if rng.random() < 0.5:
-                    mem[o:o + 4] = (MB + rng.randrange(0, MS - 0x400, 4)).to_bytes(4, "little")
-            mem = bytes(mem)
-            flags = rng.getrandbits(4)
-            # the VFP registers: any bits, an ordinary float, a small integer (vcvt's input), or a value at a rule's
-            # edge (zeros, denormals, infinities, NaNs, the integer limits)
-            fchoices = [lambda: rng.getrandbits(32), lambda: struct.unpack("<I", struct.pack("<f", rng.uniform(-1e3, 1e3)))[0],
-                        lambda: rng.randrange(0, 256), lambda: rng.choice(EDGES)]
-            fregs = [rng.choice(fchoices)() for _ in range(32)]
-            fflags = rng.getrandbits(4)
-            cpu = Cpu()
-            for k in range(13):
-                cpu.r[k] = regs[k]
-            cpu.r[13], cpu.r[14] = MB + MS - 0x100, RET  # the same stack and return address as Unicorn's
-            cpu.n, cpu.z, cpu.c, cpu.v = (flags >> 3) & 1, (flags >> 2) & 1, (flags >> 1) & 1, flags & 1
-            for k in range(32):
-                cpu.s[k] = fregs[k]
-            cpu.fpscr = FPSCR | fflags << 28
-            cmem = ctypes.create_string_buffer(mem, MS)
-            so.scratch(cmem)
-            so.run(idx, ctypes.byref(cpu))
-            if cpu.fault:
-                so.undo()
+            uc.mem_map(addr, (len(d) + 0xFFF) & ~0xFFF)
+            uc.mem_write(addr, d)
+        LMAX = 1 << 22
+        la, lv = (ctypes.c_uint32 * LMAX)(), (ctypes.c_uint8 * LMAX)()
+        n = 1 + len(regions)
+        ptrs = (ctypes.c_void_p * n)(None, *[ctypes.addressof(b) for b in cbufs])
+        so.setup(n, ptrs, (ctypes.c_uint32 * n)(MB, *[r[0] for r in regions]),
+                 (ctypes.c_uint32 * n)(MS, *[len(r[1]) for r in regions]), la, lv, LMAX)
+        so.where.restype = ctypes.POINTER(ctypes.c_uint8)
+        heap_pages = [addr + o for addr, d in regions if addr == 0x08000000 for o in range(0, len(d), 0x1000)
+                      if any(d[o:o + 0x1000])]
+        written = set()  # what Unicorn wrote in the game's memory this trial
+
+        def on_write(uc_, access, address, size_, value, user):
+            written.update(range(address, address + size_))
+        for addr, d in regions:
+            uc.hook_add(UC_HOOK_MEM_WRITE, on_write, begin=addr, end=addr + len(d) - 1)
+
+        def original_byte(x):
+            for addr, d in regions:
+                if addr <= x < addr + len(d):
+                    return d[x - addr]
+        uc.mem_map(MB, MS)
+        uc.mem_map(RET, 0x1000)  # the return address holds "b .": Unicorn stops there (until) even when it reaches it mid-block
+        uc.mem_write(RET, bytes.fromhex("feffffea") * 1024)
+        matched, mismatched, untested = 0, [], 0
+        for idx, (s, _, _) in enumerate(funcs):
+            if idx % jobs != job:
                 continue
-            valid += 1
-            uc.reg_write(UC_ARM_REG_CPSR, 0x10 | (flags << 28))  # first: a mode change banks sp and lr
-            for k in range(13):
-                uc.reg_write(REGS[k], regs[k])
-            uc.reg_write(UC_ARM_REG_SP, MB + MS - 0x100)
-            uc.reg_write(UC_ARM_REG_LR, RET)
-            uc.reg_write(UC_ARM_REG_FPEXC, 0x40000000)  # VFP on
-            uc.reg_write(UC_ARM_REG_FPSCR, FPSCR | fflags << 28)
-            for k in range(32):
-                uc.reg_write(UC_ARM_REG_S0 + k, fregs[k])
-            uc.mem_write(MB, mem)
-            written.clear()
-            c_wrote = {la[k] for k in range(so.logged())}
-            try:
-                uc.emu_start(s, RET, count=200000)
-            except UcError as e:
-                bad = "unicorn: %s" % e
+            rng = random.Random(s)
+            valid, bad = 0, None
+            for _ in range(a.trials):
+                # each register: a pointer into the test memory, any value, a small number, or (--ram) an address in the
+                # game's used heap pages, where its objects are
+                choices = [lambda: MB + rng.randrange(0, MS // 2, 4), lambda: rng.getrandbits(32), lambda: rng.randrange(0, 64)]
+                if heap_pages:
+                    choices.append(lambda: rng.choice(heap_pages) + rng.randrange(0, 0x1000, 4))
+                regs = [rng.choice(choices)() for _ in range(13)]
+                mem = rng.choice(pool)
+                flags = rng.getrandbits(4)
+                # the VFP registers: any bits, an ordinary float, a small integer (vcvt's input), or a value at a rule's
+                # edge (zeros, denormals, infinities, NaNs, the integer limits)
+                fchoices = [lambda: rng.getrandbits(32), lambda: struct.unpack("<I", struct.pack("<f", rng.uniform(-1e3, 1e3)))[0],
+                            lambda: rng.randrange(0, 256), lambda: rng.choice(EDGES)]
+                fregs = [rng.choice(fchoices)() for _ in range(32)]
+                fflags = rng.getrandbits(4)
+                cpu = Cpu()
+                for k in range(13):
+                    cpu.r[k] = regs[k]
+                cpu.r[13], cpu.r[14] = MB + MS - 0x100, RET  # the same stack and return address as Unicorn's
+                cpu.n, cpu.z, cpu.c, cpu.v = (flags >> 3) & 1, (flags >> 2) & 1, (flags >> 1) & 1, flags & 1
+                for k in range(32):
+                    cpu.s[k] = fregs[k]
+                cpu.fpscr = FPSCR | fflags << 28
+                cmem = ctypes.create_string_buffer(mem, MS)
+                so.scratch(cmem)
+                so.run(idx, ctypes.byref(cpu))
+                if cpu.fault:
+                    so.undo()
+                    continue
+                valid += 1
+                uc.reg_write(UC_ARM_REG_CPSR, 0x10 | (flags << 28))  # first: a mode change banks sp and lr
+                for k in range(13):
+                    uc.reg_write(REGS[k], regs[k])
+                uc.reg_write(UC_ARM_REG_SP, MB + MS - 0x100)
+                uc.reg_write(UC_ARM_REG_LR, RET)
+                uc.reg_write(UC_ARM_REG_FPEXC, 0x40000000)  # VFP on
+                uc.reg_write(UC_ARM_REG_FPSCR, FPSCR | fflags << 28)
+                for k in range(32):
+                    uc.reg_write(UC_ARM_REG_S0 + k, fregs[k])
+                uc.mem_write(MB, mem)
+                written.clear()
+                c_wrote = {la[k] for k in range(so.logged())}
+                try:
+                    uc.emu_start(s, RET, count=200000)
+                except UcError as e:
+                    bad = "unicorn: %s" % e
+                    so.undo()
+                    for x in written:
+                        uc.mem_write(x, bytes([original_byte(x)]))
+                    break
+                # the game's memory: every byte either side wrote, compared, then both put back as the dump holds it
+                diff = [(x, bytes(uc.mem_read(x, 1))[0], so.where(x)[0], original_byte(x)) for x in sorted(c_wrote | written)
+                        if so.where(x)[0] != bytes(uc.mem_read(x, 1))[0]]
                 so.undo()
                 for x in written:
                     uc.mem_write(x, bytes([original_byte(x)]))
-                break
-            # the game's memory: every byte either side wrote, compared, then both put back as the dump holds it
-            diff = [(x, bytes(uc.mem_read(x, 1))[0], so.where(x)[0], original_byte(x)) for x in sorted(c_wrote | written)
-                    if so.where(x)[0] != bytes(uc.mem_read(x, 1))[0]]
-            so.undo()
-            for x in written:
-                uc.mem_write(x, bytes([original_byte(x)]))
-            if uc.reg_read(UC_ARM_REG_PC) != RET:
-                # Unicorn's instruction count ran out before the return (a long loop: X's 002A54A0 on a random length
-                # read ~20,000 elements, 4 November); C's own cap counts blocks and went further: no result to compare
-                valid -= 1
-                continue
-            ur = [uc.reg_read(r) for r in REGS] + [uc.reg_read(UC_ARM_REG_SP)]
-            cp = uc.reg_read(UC_ARM_REG_CPSR) >> 28
-            cr = [cpu.r[k] for k in range(14)]
-            cf = (cpu.n << 3) | (cpu.z << 2) | (cpu.c << 1) | cpu.v
-            us = [uc.reg_read(UC_ARM_REG_S0 + k) for k in range(32)]
-            ufp, cfp = uc.reg_read(UC_ARM_REG_FPSCR) >> 28, cpu.fpscr >> 28  # (its sticky exception bits are not kept)
-            if ur != cr:
-                bad = "registers: %s" % [(k, hex(ur[k]), hex(cr[k])) for k in range(14) if ur[k] != cr[k]][:3]
-            elif cp != cf:
-                bad = "flags: arm %X, c %X" % (cp, cf)
-            elif us != list(cpu.s):
-                bad = "VFP registers: %s" % [(k, hex(us[k]), hex(cpu.s[k])) for k in range(32) if us[k] != cpu.s[k]][:3]
-            elif ufp != cfp:
-                bad = "FPSCR flags: arm %X, c %X" % (ufp, cfp)
-            elif bytes(uc.mem_read(MB, MS)) != cmem.raw:
-                bad = "memory"
-            elif diff:
-                bad = "the game's memory at %s" % ", ".join("%08X (arm %02X, c %02X, before %02X)" % d for d in diff[:3])
+                if uc.reg_read(UC_ARM_REG_PC) != RET:
+                    # Unicorn's instruction count ran out before the return (a long loop: X's 002A54A0 on a random length
+                    # read ~20,000 elements, 4 November); C's own cap counts blocks and went further: no result to compare
+                    valid -= 1
+                    continue
+                ur = [uc.reg_read(r) for r in REGS] + [uc.reg_read(UC_ARM_REG_SP)]
+                cp = uc.reg_read(UC_ARM_REG_CPSR) >> 28
+                cr = [cpu.r[k] for k in range(14)]
+                cf = (cpu.n << 3) | (cpu.z << 2) | (cpu.c << 1) | cpu.v
+                us = [uc.reg_read(UC_ARM_REG_S0 + k) for k in range(32)]
+                ufp, cfp = uc.reg_read(UC_ARM_REG_FPSCR) >> 28, cpu.fpscr >> 28  # (its sticky exception bits are not kept)
+                if ur != cr:
+                    bad = "registers: %s" % [(k, hex(ur[k]), hex(cr[k])) for k in range(14) if ur[k] != cr[k]][:3]
+                elif cp != cf:
+                    bad = "flags: arm %X, c %X" % (cp, cf)
+                elif us != list(cpu.s):
+                    bad = "VFP registers: %s" % [(k, hex(us[k]), hex(cpu.s[k])) for k in range(32) if us[k] != cpu.s[k]][:3]
+                elif ufp != cfp:
+                    bad = "FPSCR flags: arm %X, c %X" % (ufp, cfp)
+                elif bytes(uc.mem_read(MB, MS)) != cmem.raw:
+                    bad = "memory"
+                elif diff:
+                    bad = "the game's memory at %s" % ", ".join("%08X (arm %02X, c %02X, before %02X)" % d for d in diff[:3])
+                if bad:
+                    break
             if bad:
-                break
-        if bad:
-            mismatched.append((s, bad))
-        elif valid == 0:
-            untested += 1
-        else:
-            matched += 1
+                mismatched.append((s, bad))
+            elif valid == 0:
+                untested += 1
+            else:
+                matched += 1
+        return matched, mismatched, untested
+    # the functions shared between --jobs processes (forked: each its own Unicorn and its own copy of the C's state);
+    # each function's trials are seeded by its address, so the result does not depend on the number of jobs
+    readers = []
+    for job in range(a.jobs):
+        r, w = os.pipe()
+        if os.fork() == 0:
+            os.close(r)
+            with os.fdopen(w, "w") as out:
+                json.dump(check(job, a.jobs), out)
+            os._exit(0)
+        os.close(w)
+        readers.append(r)
+    matched, mismatched, untested = 0, [], 0
+    for r in readers:
+        with os.fdopen(r) as f:
+            m, bad, u = json.load(f)
+        matched, untested = matched + m, untested + u
+        mismatched += [tuple(x) for x in bad]
+    os.wait()  # (the children have all written: reap them)
+    for _ in readers[1:]:
+        os.wait()
+    mismatched.sort()
     print("%d functions in the list; %d translated (%d of them call others); %d matched, %d mismatched, %d with no valid "
           "trial" % (len(starts), len(funcs), with_calls, matched, len(mismatched), untested))
     for s, why in mismatched[:20]:
         print("  MISMATCH %08X %s" % (s, why))
-    print("not translated, by first reason:")
+    print("not translated, by first reason (and the functions that wait for that reason alone, it included):")
     for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])[:12]:
+        print("  %6d  %6s  %s" % (v, alone.get(k, "") if k != "calls an untranslated function" else "", k))
+    print("the reasons that free the most functions alone:")
+    for k, v in sorted(alone.items(), key=lambda kv: -kv[1])[:12]:
         print("  %6d  %s" % (v, k))
 
 
