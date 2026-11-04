@@ -71,6 +71,32 @@ supprime librement.
 - [ ] New Game+ : recommencer avec son Pokédex, des dresseurs plus forts et des secrets en plus
 - [ ] Mode Champion : tenir sa propre arène, que les autres joueurs viennent défier
 
+## Repris des autres jeux Pokémon
+- [ ] Pokémon Alpha (Légendes Arceus) : 10 % de chance dans les hordes, 20 % plus gros, niveau plus haut, meilleurs IV/EV, yeux rouges
+- [ ] Pokémon Baron (Légendes Arceus) : boss d'une zone, combat spécial
+- [ ] Apparitions massives et ultra-apparitions (Légendes Arceus) : beaucoup d'une espèce, chances de chromatique plus hautes
+- [ ] Capture sans combat, en lançant la Poké Ball dans le monde (Légendes Arceus)
+- [ ] Recherche du Pokédex par tâches : voir, capturer, vaincre avec telle attaque (Légendes Arceus)
+- [ ] Fabrication d'objets à partir de ressources ramassées (Légendes Arceus)
+- [ ] Rencontres visibles en monde ouvert, avec zones sauvages (Épée / Bouclier)
+- [ ] Antres et raids Dynamax / Téracristal en coop (Épée / Bouclier, Écarlate / Violet)
+- [ ] Téracristallisation (Écarlate / Violet)
+- [ ] Pique-nique et sandwichs avec bonus de rencontre (Écarlate / Violet)
+- [ ] Auto-combat : envoyer son Pokémon combattre seul dans le monde (Écarlate / Violet)
+- [ ] Capacités Z et Danses (Soleil / Lune)
+- [ ] Épreuves des îles à la place ou en plus des arènes (Soleil / Lune)
+- [ ] Pokémon Ride : montures appelées à tout moment (Soleil / Lune)
+- [ ] Formes régionales (Alola, Galar, Hisui, Paldea) dans Kalos et Hoenn
+- [ ] Cri de chromatique et chaîne de capture (Let's Go)
+- [ ] Bonbons de stats et transfert depuis un parc (Let's Go / GO Park)
+- [ ] Pokémon qui suit et réagit (HeartGold / SoulSilver, Let's Go, Écarlate / Violet)
+- [ ] Combats Sky / Inversés partout (X / Y)
+- [ ] PokéWalker / podomètre : gagner des objets en marchant avec son téléphone (HeartGold / SoulSilver)
+- [ ] Monde du Rêve et Entrepôt Rêve : Pokémon à talent caché à rencontrer (Noir / Blanc)
+- [ ] Tour de combat, Usine, Pyramide, Palace, Arène, Dôme, Pike : la Zone de combat d'Émeraude
+- [ ] Souterrain et fossiles à creuser (Diamant / Perle)
+- [ ] Mystery Dungeon : donjons où l'on joue un Pokémon
+
 ## Création et mods
 - [ ] Éditeur intégré (cartes, dresseurs, scripts) avec rechargement à chaud
 - [ ] Mods en paquets, installation en un clic
