@@ -238,6 +238,20 @@ void hos_thread_exit(HosThread* t)
         dispatch();
 }
 
+/* periodic work of the system (the GPU's VBlank: Gsp.c), run by the clock thread under hos_lock */
+static struct { int64_t period, next; void (*run)(void); } periodic[8];
+static int periodic_count;
+
+void hos_clock_every(int64_t period_ns, void (*run)(void))
+{
+    if (periodic_count < 8) {
+        periodic[periodic_count].period = period_ns;
+        periodic[periodic_count].next = hos_now_ns() + period_ns;
+        periodic[periodic_count++].run = run;
+        hos_clock_kick();
+    }
+}
+
 /* the clock thread: wakes the waits whose timeout passed and fires the timers due, then sleeps to the next one */
 static void* clock_main(void* p)
 {
@@ -247,7 +261,15 @@ static void* clock_main(void* p)
         int64_t now = hos_now_ns();
         hos_timeouts_fire(now);
         hos_timers_fire(now);
+        for (int i = 0; i < periodic_count; i++)
+            while (periodic[i].next <= now) {
+                periodic[i].run();
+                periodic[i].next += periodic[i].period;
+            }
         int64_t next = hos_next_deadline();
+        for (int i = 0; i < periodic_count; i++)
+            if (!next || periodic[i].next < next)
+                next = periodic[i].next;
         if (!next || next - now > 100000000)
             next = now + 100000000; /* (at least every 0.1 s) */
         struct timespec ts = {(time_t)(next / 1000000000), (long)(next % 1000000000)};

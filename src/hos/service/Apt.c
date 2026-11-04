@@ -126,7 +126,7 @@ static void relocate_font(uint8_t* font, uint32_t address)
         if (!first_cmap && !memcmp(font + at, "CMAP", 4))
             first_cmap = at;
         else if (!memcmp(font + at, "FINF", 4)) {
-            memcpy(&assumed_cmap, font + at + 0x1C, 4);
+            memcpy(&assumed_cmap, font + at + 0x18, 4); /* (FINF: tglp at + 0x10, cwdh + 0x14, cmap + 0x18) */
             assumed_cmap -= 8;
         }
         at += size;
@@ -137,7 +137,7 @@ static void relocate_font(uint8_t* font, uint32_t address)
         uint32_t size, v;
         memcpy(&size, font + at + 4, 4);
         static const struct { const char* magic; int fields[3]; int keep_zero; } moved[] = {
-            {"FINF", {0x14, 0x18, 0x1C}, 0}, {"CMAP", {0x10, 0, 0}, 1}, {"CWDH", {0x0C, 0, 0}, 1}, {"TGLP", {0x1C, 0, 0}, 0}};
+            {"FINF", {0x10, 0x14, 0x18}, 0}, {"CMAP", {0x10, 0, 0}, 1}, {"CWDH", {0x0C, 0, 0}, 1}, {"TGLP", {0x1C, 0, 0}, 0}};
         for (int k = 0; k < 4; k++)
             if (!memcmp(font + at, moved[k].magic, 4))
                 for (int f = 0; f < 3 && moved[k].fields[f]; f++) {

@@ -121,6 +121,12 @@ void hos_svc(Cpu* c, uint32_t n)
     uint32_t* r = c->r;
     HosObject* o;
     pthread_mutex_lock(&hos_lock);
+    /* HOS_TRACE=1: each call printed as Pomegrade's code trace records Azahar's (tools/hos_trace_compare.py) */
+    static int trace = -1;
+    if (trace < 0)
+        trace = getenv("HOS_TRACE") != NULL;
+    if (trace)
+        fprintf(stderr, "trace thread %u lr %08X svc %02X %08X %08X %08X %08X\n", t->id, r[14], n, r[0], r[1], r[2], r[3]);
     switch (n) {
     case 0x01: /* ControlMemory: in r0=operation, r1=addr0, r2=addr1, r3=size, r4=permissions; out r0, r1=out_addr */
         r[0] = hos_control_memory(&r[1], r[0], r[1], r[2], r[3], r[4]);

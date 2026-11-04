@@ -109,6 +109,7 @@ void hos_yield(HosThread* t);             /* SleepThread(0): behind the ready th
 void hos_thread_exit(HosThread* t);
 void hos_clock_start(void);               /* the clock thread: timeouts and timers */
 void hos_clock_kick(void);                /* a new deadline: the clock thread looks again */
+void hos_clock_every(int64_t period_ns, void (*run)(void)); /* run every period, by the clock thread, under hos_lock */
 
 /* waiting (Sync.c) */
 HosResult hos_wait(HosThread* t, HosObject** objects, int count, int wait_all, int64_t timeout_ns, int32_t* index);

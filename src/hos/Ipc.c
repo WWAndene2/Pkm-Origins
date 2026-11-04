@@ -2,9 +2,10 @@
 #include "Ipc.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-static const HosService* const services[] = {&hos_srv, &hos_apt_a, &hos_apt_u, &hos_ndm_u, &hos_cfg_u, &hos_ptm_u, &hos_frd_u, &hos_boss_u, &hos_fs_user, &hos_hid_user};
+static const HosService* const services[] = {&hos_srv, &hos_apt_a, &hos_apt_u, &hos_ndm_u, &hos_cfg_u, &hos_ptm_u, &hos_frd_u, &hos_boss_u, &hos_fs_user, &hos_hid_user, &hos_gsp_gpu};
 
 uint32_t hos_in(HosRequest* q, int k)
 {
@@ -78,8 +79,14 @@ HosResult hos_ipc_request(HosThread* t, HosObject* session)
     HosRequest q = {t, session, t->cpu.tls + 0x80, 0};
     q.command = hos_in(&q, 0) >> 16;
     const HosService* s = session->service;
+    static int trace = -1;
+    if (trace < 0)
+        trace = getenv("HOS_TRACE") != NULL;
     for (int i = 0; s->commands[i].run; i++)
         if (s->commands[i].id == q.command) {
+            if (trace)
+                fprintf(stderr, "trace thread %u ipc %s:%s %08X %08X %08X %08X %08X\n", t->id, s->name, s->commands[i].name,
+                        hos_in(&q, 0), hos_in(&q, 1), hos_in(&q, 2), hos_in(&q, 3), hos_in(&q, 4));
             s->commands[i].run(&q);
             return HOS_OK;
         }
