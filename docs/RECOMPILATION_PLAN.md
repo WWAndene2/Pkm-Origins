@@ -94,6 +94,13 @@ built so that something runs early and grows (§2).
   WAV / OGG sounds), like Pomegrade's HD texture packs; edited with ordinary tools (Blender, an image editor), with a
   BCH to glTF converter and back to write. No engine (Godot or other) in the program; a visual editor (maps, placing
   characters) could come later as a separate tool, if wanted.
+- **Mods (owner's discussion, 4 November).** Every change to the game (the ideas of `docs/FEATURE_IDEAS.md`, the
+  rebalance of `docs/BALANCE_STUDY.md`) is delivered as a mod: a file holding only our changes, no game code. A mod says
+  where in the game to act and what to do there: call our function before / after / instead of the instruction at an
+  address, change a constant, or replace a whole function once it is decompiled into readable C; the translator applies
+  them while it writes the C, so one instruction can be changed without copying anything. Our mods ship inside the tool
+  as options the player ticks; others can add their own. Privately, the owner may edit the generated C of their own copy
+  freely; the rules only concern what is published.
 - Not checked: how the N64 recompilation projects ship their releases; the above follows from CLAUDE.md §1, not from
   their example.
 
