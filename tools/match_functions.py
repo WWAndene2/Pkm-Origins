@@ -14,13 +14,17 @@ repository: it holds the game's literal constants). Needs capstone, unicorn and 
 Unicorn stands in for Azahar here (same ARM instructions, no 3DS system); whole-game checks use Azahar (§4).
 """
 import argparse
+import bisect
 import json
+import mmap
 import multiprocessing
 import ctypes
 import os
 import random
 import re
 import struct
+import sys
+import time
 import subprocess
 import tempfile
 
@@ -54,13 +58,12 @@ PRELUDE = r"""
 #include <string.h>
 #include <math.h>
 #include <fenv.h>
-typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; uint32_t tls, mon, mon_addr; } Cpu;
+typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; uint32_t tls, mon, mon_addr, depth; } Cpu;
 /* memory regions: 0 is the random test memory, the others the game's memory (--ram), whose writes are logged (address,
    old byte) so that a trial can be compared on what it wrote and undone after */
-static uint8_t* RP[8]; static uint32_t RB[8], RS[8]; static int NR;
-static uint32_t* LA; static uint8_t* LV; static int NL, LMAX;
-static uint32_t RO_LO, RO_HI; /* the program's text and read-only data: read-only on the 3DS, a write faults (7) */
-void protect(uint32_t lo, uint32_t hi) { RO_LO = lo; RO_HI = hi; }
+extern uint8_t* RP[8]; extern uint32_t RB[8], RS[8]; extern int NR;
+extern uint32_t* LA; extern uint8_t* LV; extern int NL, LMAX;
+extern uint32_t RO_LO, RO_HI; /* the program's text and read-only data: read-only on the 3DS, a write faults (7) */
 static uint8_t* at(Cpu* c, uint32_t a, uint32_t n, int w)
 {
     if (a % n) { c->fault = 1; return 0; }
@@ -84,6 +87,13 @@ static uint32_t ld8(Cpu* c, uint32_t a) { uint8_t* p = at(c, a, 1, 0); return p 
 static void st32(Cpu* c, uint32_t a, uint32_t v) { uint8_t* p = at(c, a, 4, 1); if (p) memcpy(p, &v, 4); }
 static void st16(Cpu* c, uint32_t a, uint32_t v) { uint16_t h = v; uint8_t* p = at(c, a, 2, 1); if (p) memcpy(p, &h, 2); }
 static void st8(Cpu* c, uint32_t a, uint32_t v) { uint8_t* p = at(c, a, 1, 1); if (p) *p = v; }
+"""
+# the trial machinery, in the first of the C files only (the functions are spread over several, compiled at once)
+MAIN = r"""
+uint8_t* RP[8]; uint32_t RB[8], RS[8]; int NR;
+uint32_t* LA; uint8_t* LV; int NL, LMAX;
+uint32_t RO_LO, RO_HI;
+void protect(uint32_t lo, uint32_t hi) { RO_LO = lo; RO_HI = hi; }
 void setup(int nr, uint8_t** p, uint32_t* b, uint32_t* s, uint32_t* la, uint8_t* lv, int lmax)
 { NR = nr; for (int i = 0; i < nr; i++) { RP[i] = p[i]; RB[i] = b[i]; RS[i] = s[i]; } LA = la; LV = lv; LMAX = lmax; }
 void scratch(uint8_t* p) { RP[0] = p; NL = 0; }
@@ -120,13 +130,14 @@ def svc_stand_in(n, r):
     return out
 
 
-def translate_one(s):
-    """(s, ((C, size), callees)), or (s, the reason it is not translated)"""
+def translate_one(s, end=None, is_thumb=None):
+    """(s, ((C, size), callees)), or (s, the reason it is not translated). end and is_thumb: an entry inside a function
+    (a branch's target there), translated to that function's end in its instruction set"""
     code, base, size, arm, thumb, relocated = TRANSLATE
     try:
         callees = set()
-        c = arm2c.translate(code, base, s, s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees, relocated,
-                            s in thumb, thumb)
+        c = arm2c.translate(code, base, s, end or s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees,
+                            relocated, s in thumb if is_thumb is None else is_thumb, thumb, set())
         return s, (c, callees)
     except arm2c.Unsupported as x:
         return s, "instruction " + str(x).split()[1] if str(x).startswith("instruction") else str(x)
@@ -170,6 +181,30 @@ def main():
         else:
             (c, n), callees = got
             funcs[s], deps[s] = (c, n), callees
+    # the entries inside functions their branches reach (shared tails), translated as functions of their own, from
+    # there to the end of the function holding them, until none is new (an entry's code may branch into another)
+    entry_thumb = set()
+    while True:
+        new = {t for d in deps.values() for t in d if t not in funcs and t not in why and t not in size}
+        if not new:
+            break
+        for t in sorted(new):
+            k = bisect.bisect(starts, t) - 1
+            f = starts[k] if k >= 0 else None
+            if f is None or t >= f + (size[f] or 0):
+                why[t] = "branch to no function's code"
+                reasons[why[t]] = reasons.get(why[t], 0) + 1
+                continue
+            _, got = translate_one(t, f + min(size[f], 0x4000), f in thumb)
+            if isinstance(got, str):
+                why[t] = got
+                reasons["(entry) " + got] = reasons.get("(entry) " + got, 0) + 1
+            else:
+                (c, n), callees = got
+                funcs[t], deps[t] = (c, n), callees
+                if f in thumb:
+                    entry_thumb.add(t)
+    thumb |= entry_thumb  # (an entry in a Thumb function is Thumb: its address in the table and Unicorn's start)
     # a function whose callee is not translated is not either, until none is left
     while True:
         drop = [s for s in funcs if not deps[s] <= funcs.keys()]
@@ -211,14 +246,19 @@ def main():
     funcs = [(s, c, n) for s, (c, n) in sorted(funcs.items())]
     tmp = a.keep or tempfile.mkdtemp()
     os.makedirs(tmp, exist_ok=True)
-    src = os.path.join(tmp, "functions.c")
-    with open(src, "w") as f:
-        f.write(PRELUDE)
-        f.write(arm2c.RUNTIME)
-        for s, _, _ in funcs:
-            f.write("void f_%08X(Cpu* c, uint32_t ret);\n" % s)
-        for s, c, _ in funcs:
-            f.write(c + "\n")
+    # the C in one file per job (compiled at once), each with the declarations; the first has the trial machinery and
+    # the tables
+    protos = "".join("void f_%08X(Cpu* c, uint32_t ret);\n" % s for s, _, _ in funcs)
+    parts = max(1, a.jobs)
+    srcs = [os.path.join(tmp, "functions%d.c" % k) for k in range(parts)]
+    for k, path in enumerate(srcs):
+        with open(path, "w") as f:
+            f.write(PRELUDE + arm2c.RUNTIME + protos)
+            for s, c, _ in funcs[k::parts]:
+                f.write(c + "\n")
+    src = srcs[0]
+    with open(src, "a") as f:
+        f.write(MAIN)
         # call_indirect: a binary search of the translated functions by address (a Thumb one's with bit 0 set, as a
         # pointer to it holds it: an even address to Thumb code, or odd to ARM, finds nothing) (an untranslated target: fault 4,
         # the trial does not count)
@@ -229,14 +269,19 @@ def main():
                 " while (lo < hi) { int m = (lo + hi) / 2; if (A[m] < t) lo = m + 1; else hi = m; }"
                 " if (lo < %d && A[lo] == t) T[lo](c, ret); else c->fault = 4; }\n" % (len(funcs), len(funcs)))
     lib = os.path.join(tmp, "functions.so")
-    subprocess.run(["cc", "-O1", "-shared", "-fPIC", "-w", "-frounding-math", "-ffp-contract=off", "-o", lib, src, "-lm"], check=True)
+    flags = ["-O1", "-fPIC", "-w", "-frounding-math", "-ffp-contract=off"]
+    compiling = [subprocess.Popen(["cc", "-c"] + flags + ["-o", path + ".o", path]) for path in srcs]
+    if any(p_.wait() for p_ in compiling):
+        raise SystemExit("the generated C does not compile")
+    subprocess.run(["cc", "-shared", "-o", lib] + [path + ".o" for path in srcs] + ["-lm"], check=True)
     so = ctypes.CDLL(lib)
 
     class Cpu(ctypes.Structure):
         _fields_ = [("r", ctypes.c_uint32 * 16), ("n", ctypes.c_uint32), ("z", ctypes.c_uint32), ("c", ctypes.c_uint32),
                     ("v", ctypes.c_uint32), ("fault", ctypes.c_int), ("steps", ctypes.c_uint32),
                     ("s", ctypes.c_uint32 * 32), ("fpscr", ctypes.c_uint32),
-                        ("tls", ctypes.c_uint32), ("mon", ctypes.c_uint32), ("mon_addr", ctypes.c_uint32)]
+                        ("tls", ctypes.c_uint32), ("mon", ctypes.c_uint32), ("mon_addr", ctypes.c_uint32),
+                    ("depth", ctypes.c_uint32)]
 
     # the random test memories: a pool made once (half the words point into the test memory, so pointer chains stay
     # inside it), each trial taking one; drawing 16,384 words per trial was most of a run's time
@@ -251,6 +296,7 @@ def main():
 
     def check(job, jobs):
         """the trials of every jobs-th function from job: (matched, mismatched, no valid trial)"""
+        began = time.time()
         uc = Uc(UC_ARCH_ARM, UC_MODE_ARM)
         # the game's memory under the test, the same in both: the dump's regions (the program as it ran, its data and bss
         # live, the modules loaded), or without --ram only the program as the cartridge holds it (for Unicorn to run)
@@ -309,7 +355,11 @@ def main():
         for idx, (s, _, _) in enumerate(funcs):
             if idx % jobs != job:
                 continue
+            if job == 0 and idx % (500 * jobs) == 0:  # progress, on stderr (a whole game is minutes)
+                sys.stderr.write("  %d / %d functions tested, %d s\n" % (idx, len(funcs), time.time() - began))
+                sys.stderr.flush()
             rng = random.Random(s)
+            struct.pack_into("<I", current, 4 * job, s)
             valid, bad = 0, None
             for _ in range(a.trials):
                 # each register: a pointer into the test memory, any value, a small number, or (--ram) an address in the
@@ -405,6 +455,8 @@ def main():
         return matched, mismatched, untested, thumb_matched
     # the functions shared between --jobs processes (forked: each its own Unicorn and its own copy of the C's state);
     # each function's trials are seeded by its address, so the result does not depend on the number of jobs
+    # each job writes the function it is testing here: a job that dies (the C crashing) is reported with it
+    current = mmap.mmap(-1, 4 * a.jobs)
     readers = []
     for job in range(a.jobs):
         r, w = os.pipe()
@@ -418,7 +470,12 @@ def main():
     matched, mismatched, untested, thumb_matched = 0, [], 0, 0
     for r in readers:
         with os.fdopen(r) as f:
-            m, bad, u, tm = json.load(f)
+            text = f.read()
+        if not text:
+            job = readers.index(r)
+            raise SystemExit("job %d died testing %08X (the translated C crashed: run --only %X --jobs 1)"
+                             % (job, struct.unpack_from("<I", current, 4 * job)[0], struct.unpack_from("<I", current, 4 * job)[0]))
+        m, bad, u, tm = json.loads(text)
         matched, untested, thumb_matched = matched + m, untested + u, thumb_matched + tm
         mismatched += [tuple(x) for x in bad]
     os.wait()  # (the children have all written: reap them)
@@ -427,7 +484,7 @@ def main():
     mismatched.sort()
     print("%d functions in the list; %d translated (%d of them call others); %d matched, %d mismatched, %d with no valid "
           "trial" % (len(starts), len(funcs), with_calls, matched, len(mismatched), untested))
-    print("  Thumb: %d in the list, %d translated, %d matched" % (len(thumb), sum(1 for f in funcs if f[0] in thumb),
+    print("  Thumb: %d in the list, %d translated, %d matched" % (len(thumb - entry_thumb), sum(1 for f in funcs if f[0] in thumb),
                                                                thumb_matched))
     for s, why in mismatched[:20]:
         print("  MISMATCH %08X %s" % (s, why))

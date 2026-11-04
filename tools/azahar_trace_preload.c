@@ -7,6 +7,7 @@
    the core's functions in memory (x86-64 only).
    Written to $PKM_TRACE_DIR/counts.txt every second and when the run ends (or is stopped by SIGTERM / SIGINT):
      svc <id> <name> <count>        and        ipc <service>:<request> <header> <count>
+   and to modules.txt each CRO module as it is loaded: <name> <address> <end> <calls made before it>
 
      cc -shared -fPIC -O1 -o azahar_trace_preload.so tools/azahar_trace_preload.c -ldl -lpthread
      PKM_TRACE_DIR=<folder> LD_PRELOAD=<that .so> <Pomegrade's run_local.sh ...>    (tools/azahar_trace_run.sh)
@@ -99,6 +100,21 @@ static void service_request(void* system, const struct cxx_string* service, cons
 
 static void no_tick(void* system) { (void)system; }
 
+/* the core's ModuleLoaded(Core::System&, const std::string& name, u32 address, u32 end): each CRO module the game loads,
+   where (ldr:ro maps it there), appended to modules.txt as the game loads it */
+static char modules_path[4096];
+static void module_loaded(void* system, const struct cxx_string* name, uint32_t address, uint32_t end)
+{
+    (void)system;
+    pthread_mutex_lock(&lock);
+    FILE* f = fopen(modules_path, "a");
+    if (f) {
+        fprintf(f, "%.*s %08X %08X %llu\n", (int)name->n, name->p, address, end, total);
+        fclose(f);
+    }
+    pthread_mutex_unlock(&lock);
+}
+
 static void stop(int sig)
 {
     pthread_mutex_lock(&lock);
@@ -145,15 +161,19 @@ void* dlopen(const char* file, int flags)
     void* sr = dlsym(h, "_ZN9Pomegrade9CodeTrace14ServiceRequestERN4Core6SystemERKNSt7__cxx1112basic_stringIcSt11"
                         "char_traitsIcESaIcEEEPKcPKjm");
     void* tick = dlsym(h, "_ZN9Pomegrade9CodeTrace4TickERN4Core6SystemE");
-    if (!configure || !kc || !sr || !tick) {
+    void* ml = dlsym(h, "_ZN9Pomegrade9CodeTrace12ModuleLoadedERN4Core6SystemERKNSt7__cxx1112basic_stringIcSt11char_"
+                        "traitsIcESaIcEEEjj");
+    if (!configure || !kc || !sr || !tick || !ml) {
         fprintf(stderr, "azahar_trace_preload: the core has no Pomegrade code trace\n");
         return h;
     }
-    if (!redirect(kc, (void*)kernel_call) || !redirect(sr, (void*)service_request) || !redirect(tick, (void*)no_tick)) {
+    if (!redirect(kc, (void*)kernel_call) || !redirect(sr, (void*)service_request) || !redirect(tick, (void*)no_tick) ||
+        !redirect(ml, (void*)module_loaded)) {
         fprintf(stderr, "azahar_trace_preload: could not redirect the trace's hooks\n");
         return h;
     }
     snprintf(out_path, sizeof out_path, "%s/counts.txt", dir);
+    snprintf(modules_path, sizeof modules_path, "%s/modules.txt", dir);
     atexit(at_exit);
     signal(SIGTERM, stop);
     signal(SIGINT, stop);
