@@ -19,6 +19,7 @@ import multiprocessing
 import ctypes
 import os
 import random
+import re
 import struct
 import subprocess
 import tempfile
@@ -27,7 +28,7 @@ from unicorn import UC_ARCH_ARM, UC_HOOK_MEM_WRITE, UC_MODE_ARM, Uc, UcError
 from unicorn.arm_const import (UC_ARM_REG_CPSR, UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
                                UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_R8,
                                UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12, UC_ARM_REG_SP,
-                               UC_ARM_REG_PC, UC_ARM_REG_FPEXC, UC_ARM_REG_FPSCR, UC_ARM_REG_S0)
+                               UC_ARM_REG_PC, UC_ARM_REG_FPEXC, UC_ARM_REG_FPSCR, UC_ARM_REG_S0, UC_ARM_REG_C13_C0_3)
 
 import arm2c
 
@@ -35,6 +36,9 @@ REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R
         UC_ARM_REG_R7, UC_ARM_REG_R8, UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12]
 # the FPSCR every 3DS thread runs with (Azahar's kernel/thread.cpp): default NaN, flush to zero, round toward zero
 FPSCR = 0x03C00010
+# the thread's local storage (mrc p15, 0, rX, c13, c0, 3): in the test memory, its words random as the rest; and an
+# ARM clrex on the return page, run before each trial
+TLS, CLREX = 0x1F008000, 0x1E000800
 # the random test memory and the return address, away from the game's own memory (heap 0x08000000, stack below
 # 0x10000000, linear heap 0x14000000)
 MB, MS, RET = 0x1F000000, 0x10000, 0x1E000000
@@ -50,7 +54,7 @@ PRELUDE = r"""
 #include <string.h>
 #include <math.h>
 #include <fenv.h>
-typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; } Cpu;
+typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; uint32_t tls, mon, mon_addr; } Cpu;
 /* memory regions: 0 is the random test memory, the others the game's memory (--ram), whose writes are logged (address,
    old byte) so that a trial can be compared on what it wrote and undone after */
 static uint8_t* RP[8]; static uint32_t RB[8], RS[8]; static int NR;
@@ -114,6 +118,8 @@ def main():
     p.add_argument("--keep")
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="processes running the trials (default: one per CPU)")
     p.add_argument("--cro", help="the game's modules (static.crs): the words of the program they rewrite are read when run")
+    p.add_argument("--uses", help="test only the functions with one of these instructions (a regular expression on the "
+                   "mnemonic: 'ldrex|strex', 'v(add|mul)'), and what they call: a quick check of a new translation")
     p.add_argument("--only", type=lambda v: int(v, 16), help="test this function only (and what it calls)")
     p.add_argument("--exheader", help="the program's exheader: its text and read-only data are made read-only, as on "
                    "the 3DS (a trial writing there is impossible in the game: X's 00507F50 on a random index wrote its "
@@ -166,8 +172,11 @@ def main():
         if len(r) == 1:
             k = next(iter(r))
             alone[k] = alone.get(k, 0) + 1
-    if a.limit or a.only:  # the first N (or the one asked), and every function they call (directly or not)
-        keep, todo = set(), [a.only] if a.only else sorted(funcs)[:a.limit]
+    if a.uses:  # the functions with such an instruction (the disassembly each C line carries in its comment)
+        uses = re.compile(r"/\* [0-9A-F]{8} (%s)\b" % a.uses)
+        chosen = sorted(f for f in funcs if uses.search(funcs[f][0]))
+    if a.limit or a.only or a.uses:  # the first N (or the one asked, or --uses), and every function they call
+        keep, todo = set(), [a.only] if a.only else chosen if a.uses else sorted(funcs)[:a.limit]
         while todo:
             k = todo.pop()
             if k not in keep:
@@ -202,7 +211,8 @@ def main():
     class Cpu(ctypes.Structure):
         _fields_ = [("r", ctypes.c_uint32 * 16), ("n", ctypes.c_uint32), ("z", ctypes.c_uint32), ("c", ctypes.c_uint32),
                     ("v", ctypes.c_uint32), ("fault", ctypes.c_int), ("steps", ctypes.c_uint32),
-                    ("s", ctypes.c_uint32 * 32), ("fpscr", ctypes.c_uint32)]
+                    ("s", ctypes.c_uint32 * 32), ("fpscr", ctypes.c_uint32),
+                        ("tls", ctypes.c_uint32), ("mon", ctypes.c_uint32), ("mon_addr", ctypes.c_uint32)]
 
     # the random test memories: a pool made once (half the words point into the test memory, so pointer chains stay
     # inside it), each trial taking one; drawing 16,384 words per trial was most of a run's time
@@ -257,6 +267,7 @@ def main():
         uc.mem_map(MB, MS)
         uc.mem_map(RET, 0x1000)  # the return address holds "b .": Unicorn stops there (until) even when it reaches it mid-block
         uc.mem_write(RET, bytes.fromhex("feffffea") * 1024)
+        uc.mem_write(CLREX, bytes.fromhex("1ff07ff5"))
         matched, mismatched, untested, thumb_matched = 0, [], 0, 0
         for idx, (s, _, _) in enumerate(funcs):
             if idx % jobs != job:
@@ -286,6 +297,7 @@ def main():
                 for k in range(32):
                     cpu.s[k] = fregs[k]
                 cpu.fpscr = FPSCR | fflags << 28
+                cpu.tls = TLS
                 cmem = ctypes.create_string_buffer(mem, MS)
                 so.scratch(cmem)
                 so.run(idx, ctypes.byref(cpu))
@@ -299,6 +311,8 @@ def main():
                 uc.reg_write(UC_ARM_REG_SP, MB + MS - 0x100)
                 uc.reg_write(UC_ARM_REG_LR, RET)
                 uc.reg_write(UC_ARM_REG_FPEXC, 0x40000000)  # VFP on
+                uc.reg_write(UC_ARM_REG_C13_C0_3, TLS)
+                uc.emu_start(CLREX, CLREX + 4)  # the exclusive monitor closed, as the C's starts (a trial may leave it open)
                 uc.reg_write(UC_ARM_REG_FPSCR, FPSCR | fflags << 28)
                 for k in range(32):
                     uc.reg_write(UC_ARM_REG_S0 + k, fregs[k])

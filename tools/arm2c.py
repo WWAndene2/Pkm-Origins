@@ -5,9 +5,10 @@ Each instruction becomes C on a register file and the flags; branches inside the
 loads become constants. Anything outside this subset makes the function "unsupported" (returned as None, with the reason),
 never translated approximately. Matched against the original by tools/match_functions.py.
 
-  arm2c.py <code.bin> <address> [--end ADDRESS]      prints the C of one function (or why it is unsupported)
+  arm2c.py <code.bin> <address, hex> [--functions LIST] [--cro DIR] [--end ADDRESS]
+      prints the C of one function (or why it is unsupported), and the functions it calls
 
-The C uses: typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; } Cpu; and the memory helpers ld8/ld16/ld32,
+The C uses: typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; uint32_t tls, mon, mon_addr; } Cpu; and the memory helpers ld8/ld16/ld32,
 st8/st16/st32 (tools/match_functions.py defines them: a fault flag instead of undefined behaviour out of the test memory).
 """
 import argparse
@@ -132,6 +133,55 @@ def static_relocations(cro_dir):
         if t is not None:
             out.add(t)
     return frozenset(out)
+
+
+EXCLUSIVE = {"ldrex": 32, "ldrexh": 16, "ldrexb": 8, "ldrexd": 64, "strex": 32, "strexh": 16, "strexb": 8, "strexd": 64}
+
+
+def coprocessor(i, op):
+    """mrc / mcr: the two forms the game uses. mrc p15, 0, rd, c13, c0, 3 reads the thread's user read-only ID register,
+    which the 3DS kernel sets to the thread's local storage (TLS: the IPC command buffer at + 0x80); the C reads c->tls,
+    which the runtime sets for each thread (the trials: a place in the test memory). mcr p15, 0, rX, c7, c10, 4 / 5 are
+    ARMv6's data synchronization and memory barriers: one thread's C needs none."""
+    f = i.op_str.replace(" ", "").split(",")
+    if op == "mrc" and f[0] == "p15" and f[1] == "#0" and f[3:] == ["c13", "c0", "#3"] and f[2] in REG and REG[f[2]] < 13:
+        return "c->r[%d] = c->tls;" % REG[f[2]]
+    if op == "mcr" and f[0] == "p15" and f[1] == "#0" and f[3:5] == ["c7", "c10"] and f[5] in ("#4", "#5"):
+        return "/* barrier */"
+    raise Unsupported("instruction %s %s" % (op, "p15" if f[0] == "p15" else "other coprocessor"))
+
+
+def exclusive(i, op):
+    """ldrex / strex (and their byte, halfword and doubleword forms) and clrex, on one CPU's exclusive monitor: ldrex
+    opens it on its address (c->mon = 1, c->mon_addr), strex stores and writes 0 to its status register only while it
+    is open on that address, else writes 1 and stores nothing; both strex and clrex close it. (Another thread's store
+    cannot happen inside one translated function: the runtime's threads are its concern.)"""
+    if op == "clrex":
+        return "c->mon = 0;"
+    ops = i.operands
+    regs = [REG[i.reg_name(o.reg)] for o in ops if o.type == ARM_OP_REG]
+    mem = ops[-1]
+    if mem.type != ARM_OP_MEM or mem.mem.disp or mem.mem.index or 15 in regs or 13 in regs:
+        raise Unsupported("instruction %s form" % op)
+    b = REG[i.reg_name(mem.mem.base)]
+    size = EXCLUSIVE[op]
+    ld = {32: "ld32", 16: "ld16", 8: "ld8"}
+    st = {32: "st32", 16: "st16", 8: "st8"}
+    if op.startswith("ldrex"):
+        if size == 64:
+            return ("{ uint32_t a = c->r[%d]; if (a %% 8) { c->fault = 1; return; } uint32_t v0 = ld32(c, a), v1 = ld32(c, a + 4u);"
+                    " if (c->fault) return; c->r[%d] = v0; c->r[%d] = v1; c->mon = 1; c->mon_addr = a; }" % (b, regs[0], regs[1]))
+        return ("{ uint32_t a = c->r[%d]; uint32_t v = %s(c, a); if (c->fault) return; c->r[%d] = v; c->mon = 1;"
+                " c->mon_addr = a; }" % (b, ld[size], regs[0]))
+    status = regs[0]
+    if status == b or status in regs[1:-1] if size == 64 else status == b or status == regs[1]:
+        raise Unsupported("instruction %s form" % op)
+    if size == 64:
+        store = "if (a %% 8) { c->fault = 1; return; } st32(c, a, c->r[%d]); st32(c, a + 4u, c->r[%d]);" % (regs[1], regs[2])
+    else:
+        store = "%s(c, a, c->r[%d]);" % (st[size], regs[1])
+    return ("{ uint32_t a = c->r[%d]; if (c->mon && c->mon_addr == a) { %s if (c->fault) return; c->r[%d] = 0; }"
+            " else c->r[%d] = 1; c->mon = 0; }" % (b, store, status, status))
 
 
 def vfp(i, word, relocated):
@@ -361,6 +411,10 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         line = []
         if m.startswith("v"):
             line.append(vfp(i, word, relocated))
+        elif base_m in ("mrc", "mcr"):
+            line.append(coprocessor(i, base_m))
+        elif base_m in EXCLUSIVE or base_m == "clrex":
+            line.append(exclusive(i, base_m))
         elif base_m == "nop":
             pass
         elif i.address in switches:  # ldr pc, [pc, rN, lsl #2]: a switch over the table after it
@@ -694,13 +748,27 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("code")
-    p.add_argument("address", type=lambda s: int(s, 0))
-    p.add_argument("--end", type=lambda s: int(s, 0))
+    p.add_argument("address", type=lambda s: int(s, 16))
+    p.add_argument("--functions", help="the function list (symbols/*_functions.tsv): the function's size and instruction "
+                   "set, and the starts its calls and tail calls must reach, as match_functions.py translates it")
+    p.add_argument("--end", type=lambda s: int(s, 16))
     p.add_argument("--base", type=lambda s: int(s, 0), default=0x100000)
+    p.add_argument("--cro", help="the game's modules: the words they rewrite are read when run")
     a = p.parse_args()
     code = open(a.code, "rb").read()
+    arm, thumb, size = frozenset(), frozenset(), {}
+    if a.functions:
+        rows = [l.split() for l in open(a.functions) if l.strip() and not l.startswith("#")]
+        thumb = frozenset(int(r[0], 16) for r in rows if r[3] == "thumb")
+        arm = frozenset(int(r[0], 16) for r in rows if r[3] != "thumb")
+        size = {int(r[0], 16): int(r[4]) for r in rows}
+    end = a.end or a.address + min(size.get(a.address) or 0x400, 0x4000)
+    callees = set()
     try:
-        print(translate(code, a.base, a.address, a.end or a.address + 0x400, "f_%08X" % a.address)[0])
+        print(translate(code, a.base, a.address, end, "f_%08X" % a.address, arm, callees,
+                        static_relocations(a.cro) if a.cro else frozenset(), a.address in thumb, thumb)[0])
+        if callees:
+            print("/* calls: %s */" % " ".join("%08X" % t for t in sorted(callees)))
     except Unsupported as e:
         print("unsupported:", e)
 

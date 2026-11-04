@@ -247,4 +247,13 @@ Performance comes first in every design choice, the more so for the seamless co-
    valid trial; X **13,666 translated, 11,252 matched, 0 mismatched** (Thumb 308 of 506, 260 matched), 2,414.
    Now first, by the functions each reason holds alone (Omega Ruby): writes to pc 596, mrc 566, ldrex / strex 538,
    branches out to no start 534, loads to pc 490, pld 454, svc 431, mla 313, umull 297.
-   Then: mrc, ldrex / strex, pld, the multiplies; the jumps through pc; the system calls into `src/hos/`.
+   mrc of the thread-local storage pointer (c13, c0, 3: the runtime gives each thread its own), the ARMv6 barriers (mcr
+   c7, c10, 4 / 5: nothing for one thread's C) and ldrex / strex / clrex on an exclusive monitor added (4 November): Omega
+   Ruby **14,070 translated, 11,565 matched, 0 mismatched**, 2,505 with no valid trial; X **13,854, 11,388, 0
+   mismatched**, 2,466. svc now holds 1,526 functions alone (most read the TLS for their IPC buffer, then call the
+   kernel), then writes to pc 596, branches out to no start 538, loads to pc 490, pld 454, mla 313, umull 310.
+   Tools: match_functions.py --uses REGEX tests only the functions with such an instruction (and their callees: a new
+   translation checked in seconds), tools/match_game.sh runs a whole game in one command, arm2c.py --functions prints a
+   function's C as the check translates it.
+   Then: svc into `src/hos/` (the system calls the game makes, first as the trials see them); the jumps through pc; pld,
+   the multiplies.
