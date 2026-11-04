@@ -256,8 +256,19 @@ Principe : la version fidèle garde tout tel quel ; chaque correction est une op
   - Piste : condition sur la priorité (Game Freak : PV pleins à la 7e génération, critiqué comme trop sévère ; à mesurer).
 - [ ] Exagide et Déclic Tactique dominant
   - Piste : à mesurer d'abord ; Game Freak a réduit ses stats à la 8e génération, pour un autre jeu et un autre format.
-- [ ] Pokémon trop faibles à revaloriser (Couafarel, Polagriffe, Flabébé et sa lignée...)
-  - Correction : liste à établir à partir des stats totales et de l'usage en compétition ; nouvelles attaques ou talents plutôt que stats changées.
+- [ ] Pokémon trop faibles à revaloriser : mesure n° 1, les totaux de stats (4 novembre, `tools/personal_stats.py` sur ta copie,
+  stades finaux et légendaires d'après les tables publiques de PokeAPI)
+  - Mesuré : stats identiques dans ORAS et X (0 espèce différente) ; un seul réglage vaut pour les deux jeux.
+  - Stades finaux issus d'une évolution (269) : total moyen 490, médiane 495. Pokémon sans évolution (61) : moyenne 442.
+  - Les plus bas (hors légendaires) : Munja 236, Queulorior 250, Métamorph 288 (à part : leur rôle compense) ; puis Cadoizo 330,
+    Lovdisc 330, Zarbi 336, Canarticho 352, Spinda 360, Corayon 380, Delcatty 380, Ténéfix 380, Mysdibule 380, Mélokrik 384,
+    Papinox 385, Coxyclaque 390, Migalos 390, Papilusion / Dardargnan / Charmillon 395, Muciole / Lumivole 400,
+    Parasect / Triopikeur / Qulbutoké / Posipi / Négapi / Pachirisu 405, Simularbre / Volcaropod / Charmina 410.
+  - Kalos, les plus bas : Prismillon 411, Excavarenne 423, Dedenne 431, Cocotine 462, Mistigrix 466 ; Couafarel est à 472,
+    près de la moyenne : ma liste de mémoire (Couafarel, Polagriffe) n'était pas la bonne.
+  - Limite : le total ne dit pas tout (répartition, talents, attaques, type ; Mysdibule et Ténéfix ont une Méga-Évolution).
+    Mesures suivantes : attaques apprises et talents (mêmes archives), usage réel en 6e génération (Smogon), puis
+    simulations contre l'IA du jeu recompilé.
 - [ ] Méga-Évolutions inégales (certaines inutilisables)
   - Correction : revoir talents et stats des plus faibles ; ajouter les Méga-Évolutions de Légendes Z-A (fusion des idées modernes).
 - [ ] Attaques ou talents sans effet utile en jeu solo
