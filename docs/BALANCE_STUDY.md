@@ -80,42 +80,59 @@ pas de rôle.
 - Taux de victoire par Pokémon contre l'IA du jeu recompilé (simulations), pour le but « campagne ».
 - Listes d'attaques et talents des Pokémon délaissés, lus dans les jeux.
 
-## 7. Talents et attaques : propositions par Pokémon (option « Rééquilibré », campagne d'abord)
+## 7. Talents et attaques : propositions vérifiées (révision du 4 novembre)
 
-**Statut : propositions de l'agent, non mesurées** (question du propriétaire, 4 novembre : « sur quelle base ? »). Seuls les
-talents actuels viennent des données ; les rôles, talents et attaques proposés sont des idées de design écrites de
-mémoire, sans lecture des listes d'attaques ni test. Pour les fonder : (1) lire les listes d'attaques dans les jeux ;
-(2) partir des attaques, talents et objets réellement joués (fichiers « moveset » de Smogon, même mois) et comparer avec
-les Pokémon du même rôle qui marchent ; (3) calculer dégâts et survie avant / après ; (4) simuler contre l'IA du jeu
-recompilé. Aucune ligne ci-dessous n'est une décision.
+Demande du propriétaire : vérifier toutes les propositions. La première version de ce paragraphe (idées de l'agent, de
+mémoire) est remplacée ; ce qu'elle avait de faux est listé au §7.3.
 
-Principe (remarque du propriétaire, 4 novembre) : revaloriser par les **talents** et les **attaques** avant les stats.
-Les talents actuels sont lus dans les jeux (`tools/personal_stats.py`, noms de PokeAPI) ; les attaques proposées sont des
-attaques de la 6e génération, écrites de mémoire : **les listes d'attaques actuelles n'ont pas encore été lues** (archive
-des apprentissages, prochaine mesure), donc une attaque proposée peut déjà être apprise. Une ligne = un rôle.
+### 7.1 Données utilisées
 
-| Pokémon | Talents actuels (1 / 2 / caché) | Rôle visé | Talent proposé | Attaques proposées |
-|---|---|---|---|---|
-| Couafarel (Normal) | Toison Épaisse (les trois) | Pivot physique, rapide | Garder Toison Épaisse ; idée originale : chaque coupe donne un second type (Diamant Roche, Pharaon Sol, Dame Fée...) | Demi-Tour, Bluff, Cage-Éclair, Façade |
-| Chevroum (Plante) | Herbivore / Herbivore / Toison Herbue | Tank de soin | Caché : Régé-Force | Encornebois, Demi-Tour, Synthèse, Gonflette |
-| Dedenne (Électrik / Fée) | Bajoues / Ramassage / Plus | Soutien à baies | Garder Bajoues | Recyclage, Glas de Soin, Change Éclair, Para-Spore |
-| Banshitrouye (Spectre / Plante) | Ramassage / Fouille / Insomnia | Mur physique qui brûle | Caché : Corps Maudit | Feu Follet, Vampigraine, Synthèse, Ombre Portée |
-| Cadoizo (Glace / Vol) | Esprit Vital / Agitation / Insomnia | Soutien rapide | Caché : Farceur | Vent Arrière, Cadeau, Blizzard, Reflet |
-| Lovdisc (Eau) | Glissade / Glissade / Hydratation | Soigneur | Caché : Médic Nature | Vœu, Glas de Soin, Attraction, Ébullition |
-| Zarbi (Psy) | Lévitation (les trois) | Couteau suisse | Idée originale : la lettre fixe le type de Puissance Cachée et donne un petit bonus de stat | Puissance Cachée (seule) |
-| Spinda (Normal) | Tempo Perso / Pieds Confus / Contestation | Perturbateur | Garder Pieds Confus | Danse-Folle, Mimi-Queue, Coup d'Jus, Vantardise |
-| Corayon (Eau / Roche) | Agitation / Médic Nature / Régé-Force | Poseur de pièges | Garder Régé-Force | Piège de Roc, Toxik, Soin, Tour Rapide |
-| Delcatty (Normal) | Joli Sourire / Normalise / Peau Miracle | Soutien | Normalise avec un bonus de puissance (piste : la 7e génération l'a fait, à mesurer) | Vœu, Glas de Soin, Bâillement, Feinte |
-| Séracrawl (Glace) | Tempo Perso / Corps Gel / Fermeté | Mur physique lent | Garder Fermeté | Distorsion, Gyroballe, Soin, Tour Rapide |
-| Canarticho (Normal / Vol) | Regard Vif / Attention / Acharné | Attaquant à coups critiques | Caché : Sniper | Lame d'Air, Tranche-Nuit, Danse Lames ; idée : l'évolution d'Épée / Bouclier (Palarticho) en option |
-| Mélokrik (Insecte) | Essaim / Essaim / Technicien | Poseur de Toile | Garder Technicien | Toile Gluante, Plaie-Croix, Taillade, Chant |
-| Parasect (Insecte / Plante) | Pose Spore / Peau Sèche / Moiteur | Endormeur | Caché : Régé-Force | Spore, Plaie-Croix, Feuillage, Distorsion |
+- **Ce que chaque Pokémon apprend dans X / Y et ORAS** (niveau, œuf, CT, tuteur) : tables de PokeAPI (`pokemon_moves`,
+  groupes de versions 15 X-Y et 16 ROSA). **Vérifiées contre tes jeux** : attaques par niveau (ORAS a/1/9/1, X a/2/1/4) et
+  attaques d'œuf (a/1/9/0, a/2/1/3) identiques pour les 721 espèces des deux jeux, 0 écart. CT et tuteurs pris chez
+  PokeAPI, non recoupés avec les jeux.
+- **Ce que les joueurs jouaient vraiment** : fichiers « moveset » de Smogon, NU, septembre 2016 (nombre d'équipes, talents,
+  attaques).
+- **Attention** : Pokémon Showdown autorise les attaques venues de jeux plus anciens (transfert par la Banque). Une attaque
+  jouée sur Smogon peut donc être **impossible à apprendre en campagne** sur une seule cartouche X / Y ou ORAS ; c'est
+  vérifié ligne par ligne ci-dessous.
 
-Non retenus (rôle déjà réel) : Mysdibule (sa Méga-Évolution est bannie d'OU), Charmina (Force Pure), Qulbutoké (Marque
-Ombre), Lumivole / Muciole (Farceur).
+### 7.2 Par Pokémon
 
-À vérifier avant d'écrire une seule donnée : les listes d'attaques actuelles (déjà apprises ?), les noms français exacts
-des attaques, et l'effet en campagne (simulations contre l'IA, §6).
+| Pokémon | Joué en NU (sept. 2016) | Constat vérifié | Proposition révisée |
+|---|---|---|---|
+| Couafarel | 982 équipes ; Toison Épaisse ; Cotogarde, Retour, Toxik, Coup Bas, Repos | Rôle de mur physique réel ; pas de soin fiable (Repos seulement) ; Paresse et Dernier Mot non appris | Paresse (soin) ; idée originale à part : un second type par coupe (non mesurée) |
+| Chevroum | 1 262 ; Herbivore ; Encornebois, Gonflette, Séisme, Lait à Boire | Rôle réel, soin déjà présent ; Demi-Tour non appris | Aucune priorité ; Demi-Tour possible pour un rôle de pivot |
+| Dedenne | 1 278 ; Bajoues ; Recyclage, Frotte-Frimousse, Tonnerre | Rôle réel (baies) ; Recyclage appris au tuteur d'ORAS seulement | Recyclage aussi dans X / Y |
+| Banshitrouye (Super) | 3 930 ; Fouille ; Feu Follet, Vampigraine, Synthèse | Rôle réel ; ma proposition (Corps Maudit, attaques) n'apportait rien | Aucune |
+| Cadoizo | 346 ; Agitation ; Prélèvement Destin, Poing Glace, Bluff, Picots, Tour Rapide, Anti-Brume | Rôle de soutien réel ; **Anti-Brume non apprenable** dans X / Y / ORAS ; Vent Arrière non appris | Anti-Brume et Vent Arrière ; ses stats (330) restent le vrai frein |
+| Lovdisc | 108 ; Hydratation ; Doux Baiser, Toxik, Ébullition, Anneau Hydro | Presque injoué ; Vœu et Glas de Soin non appris | Vœu, Glas de Soin (rôle de soigneur) ; stats (330) en cause |
+| Zarbi | 53 ; Puissance Cachée seule | Une seule attaque par conception | Idée originale : la lettre fixe le type de Puissance Cachée (non mesurée) |
+| Spinda | 658 ; **Contestation** (95 %) ; Surpuissance, Coup Bas, Vampipoing | Rôle réel grâce à Contestation + Surpuissance ; **Surpuissance non apprenable** en campagne | Surpuissance par tuteur ; garder Contestation (et non Pieds Confus) |
+| Corayon | 412 ; Régé-Force ; Ébullition, Soin, Toxik, Piège de Roc | Rôle de poseur de pièges réel ; Tour Rapide non appris | Tour Rapide |
+| Delcatty | 666 ; Normalise ; Bluff, Coup Bas, Abri, Vœu | **Vœu et Coup Bas non apprenables** en campagne (transfert seulement) | Vœu et Coup Bas par tuteur |
+| Séracrawl | 2 822 ; Fermeté ; Avalanche, Tour Rapide, Soin, Séisme | Rôle réel ; Distorsion non appris ; sa Déf. Spé. (46) est le frein | Distorsion possible ; pas prioritaire |
+| Canarticho | 243 ; **Acharné** (71 %) ; Lame Feuille, Rapace, Danse Lames | Attaques déjà là ; le frein est le total (352) et l'objet Bâton | Pas de nouveau talent (Sniper retiré) ; le vrai levier est hors attaques (stats ou évolution d'Épée / Bouclier, à étudier) |
+| Mélokrik | 395 ; Technicien ; Toile Gluante, Aéropiqué | Rôle réel (Toile Gluante déjà apprise) | Aucune |
+| Parasect | 518 ; Peau Sèche ; Spore, Plaie Croix, Vampigraine, Sabotage | Rôle réel (Spore) ; Distorsion non appris | Aucune priorité |
+
+**Conclusion vérifiée** : pour la plupart de ces Pokémon, le rôle existe déjà et les joueurs le trouvent ; le frein est
+surtout leurs **stats**. Le seul manque clair en campagne est une série d'**attaques jouées en compétition mais
+impossibles à apprendre sur une seule cartouche** (Surpuissance pour Spinda, Vœu et Coup Bas pour Delcatty, Anti-Brume pour
+Cadoizo) : les rendre disponibles par tuteur ne change pas l'équilibre compétitif (elles y étaient déjà) et aide la
+campagne. Proposition à étendre : lister **toutes** les attaques jouées sur Smogon mais non apprenables dans X / Y / ORAS.
+
+### 7.3 Erreurs de la première version (corrigées ci-dessus)
+
+- Noms faux : « Cage-Éclair » (Cage Éclair), « Plaie-Croix » (Plaie Croix), « Lame d'Air » (Lame d’Air), « Chant » (Berceuse),
+  « Danse-Folle » (Danse Folle), « Coup d'Jus » (n'existe pas).
+- Feuillage proposé pour Parasect : attaque de la 7e génération, absente de X / Y / ORAS.
+- Attaques « proposées » déjà apprises : Façade, Demi-Tour (Couafarel), Encornebois, Synthèse, Gonflette, Feu Follet,
+  Vampigraine, Ombre Portée, Cadeau, Blizzard, Reflet, Attraction, Ébullition, Toxik, Soin, Gyroballe, Tranche-Nuit, Danse
+  Lames, Toile Gluante, Taillade, Spore.
+- Talents contraires aux données : Pieds Confus pour Spinda (95 % des joueurs utilisent Contestation), Sniper pour
+  Canarticho (Acharné utilisé à 71 %), Corps Maudit pour Banshitrouye (rôle déjà rempli).
+- Mimi-Queue proposée pour Spinda : attaque faible, sans intérêt pour le rôle.
 
 Sources : https://www.smogon.com/stats/2016-09/ (ubers-0.txt, ou-0.txt, uu-0.txt, ru-0.txt, nu-0.txt, vgc2016-0.txt) ;
 PokeAPI (https://github.com/PokeAPI/pokeapi, data/v2/csv) ; stats de base lues dans les jeux.
