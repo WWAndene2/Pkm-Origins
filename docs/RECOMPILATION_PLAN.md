@@ -217,11 +217,17 @@ Performance comes first in every design choice, the more so for the seamless co-
    switch (sp loaded from a register, as a saved-context restore) is refused. Each function gets the address it returns
    to, so a pop {pc} loading another one is caught. `tools/match_functions.py` (was match_leaf.py) runs the same stack
    and return address on both sides and compares sp too; a function counts only with all its callees translated.
-   Omega Ruby: **11,358 of 26,109 translated (4,155 calling others), 6,320 matched, 0 mismatched**, 5,038 with no valid
-   trial; X: 11,180 of 25,350 (3,991), **6,044 matched, 0 mismatched**, 5,136 with no valid trial (28 min each, both at
-   once). The trials with no result read the game's globals outside the test memory, or call indirectly a function not
-   translated yet: next, the game's real memory under the test (a RAM dump from Pomegrade's headless Azahar, its core
-   built in this session's work folder, 20 min). Not translated, first reason: callees not translated (7,867 in Omega
-   Ruby), VFP (vpush 1,219, vldr 1,016, vldmia), blx to Thumb, mrc (cp15: the thread-local pointer), svc (system calls:
-   the HOS layer, step 3 of §3), ldrex / strex, mla.
+   Without the game's memory: Omega Ruby **11,358 of 26,109 translated (4,155 calling others), 6,320 matched, 0
+   mismatched**, 5,038 with no valid trial; X 11,180 of 25,350, 6,044 matched, 0 mismatched, 5,136 with none.
+   With it (`--ram`: RAM dumps of each game on the field from the owner's saves, Pomegrade's headless Azahar, its core
+   built in this session's work folder in 20 min; writes logged on both sides, compared, undone; registers may point into
+   the game's heap) and the words the module loader rewrites read when run (`--cro`): Omega Ruby **8,311 matched, 0
+   mismatched**, 3,047 with no valid trial; X **8,226 matched, 0 mismatched**, 2,954 (32 min each, both at once).
+   The game's memory caught three faults of the translator, fixed: two instructions taken for data (a pool word that
+   read as a pc-relative ldrd: data words now only from code), the module loader's rewritten words baked in as constants
+   (367 in Omega Ruby's text), and a return to lr not checked (a shared epilogue popping lr: every return and tail call
+   now faults when lr is not the address the function got). The trials still with no result mostly call indirectly a
+   function not translated yet. Not translated, first reason: callees not translated (7,867 in Omega Ruby), VFP
+   (vpush 1,219, vldr 1,016, vldmia), blx to Thumb, mrc (cp15: the thread-local pointer), svc (system calls: the HOS
+   layer, step 3 of §3), ldrex / strex, mla.
    Then: VFP; the system calls into `src/hos/`.
