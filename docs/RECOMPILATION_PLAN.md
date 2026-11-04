@@ -36,7 +36,7 @@ built so that something runs early and grows (§2).
 | 1 | Loader (`tools/n3ds_extract.py`, done 4 November): reads the player's decrypted .3ds, writes the .code decompressed, the exheader and the CROs outside the repository | done: both games' code byte-identical to Pomegrade's extraction |
 | 2 | Translator: ARM11 (ARMv6K + VFPv2) to C for the .code; CRO relocations and imports resolved | the translated .code compiles |
 | 3 | HOS layer: the services the game calls at boot (srv, APT, FS, CFG, HID, GSP, DSP stubs) | the translated game reaches its first frame of GPU commands |
-| 4 | Renderer: PICA200 command lists and shaders to Vulkan (PC and Android), and the Android app compiling the game on the phone (§7) | the title screen draws on the owner's phone |
+| 4 | Renderer: the game's graphics library (its draw calls: models, materials, textures) reimplemented on Vulkan, PC and Android; no PICA200 command list is made or read (owner's decision, 4 November: no translation of the 3DS's GPU commands, even as a stopgap); and the Android app compiling the game on the phone (§7) | the title screen draws on the owner's phone |
 | 5 | Sound (DSP: the game's own audio lists to SDL audio), input, saves | the field is playable |
 | 6 | X/Y the same way (its own translated code; shared libraries shared) | both games run |
 | 7 | (merged into 4: Android from the start, owner's decision of 4 November) | |
