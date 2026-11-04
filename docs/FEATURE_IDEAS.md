@@ -163,6 +163,35 @@ supprime librement.
 - [ ] Langage des Pokémon : comprendre peu à peu ce que dit ton partenaire, selon votre lien
 - [ ] Pokémon qui choisissent leur dresseur : certains rares ne se capturent pas, ils te rejoignent si tu remplis leurs conditions
 
+## Idées techniques
+- [ ] Rendu interne en haute résolution (1080p, 4K), anticrénelage (MSAA / TAA), filtrage anisotrope
+- [ ] Ombres dynamiques en temps réel au lieu des ombres précalculées
+- [ ] Distance d'affichage et niveau de détail (LOD) réglables, sans apparition tardive des objets
+- [ ] Fréquence d'image libre (60, 120, 144 Hz) avec logique du jeu découplée de l'affichage
+- [ ] Interpolation des animations des modèles (animations 30 images/s lissées à 60+)
+- [ ] Chargements en arrière-plan (streaming des zones) : plus aucun écran noir entre les cartes
+- [ ] Shaders de la PICA200 traduits une fois en SPIR-V / GLSL, avec cache : aucune saccade de compilation
+- [ ] Post-traitement en option : bloom, occlusion ambiante (SSAO), correction des couleurs, HDR
+- [ ] Mise à l'échelle par IA des textures d'origine (paquets générés hors du dépôt, chez le joueur)
+- [ ] Remplacement des textures et modèles par paquets, chargés à chaud (format documenté)
+- [ ] Audio haute qualité : musiques en flux sans compression 3DS, mixage dynamique, son spatialisé
+- [ ] Remappage complet manette / clavier / tactile, profils par appareil
+- [ ] Sauvegardes versionnées : retour à une sauvegarde précédente, sauvegarde automatique avant chaque combat important
+- [ ] Mode débogage pour les créateurs : afficher les collisions, les zones de rencontre, les scripts, les variables
+- [ ] Console de commandes (téléportation, objets, Pokémon) réservée au mode créateur
+- [ ] Rejeu déterministe : enregistrer les entrées d'une partie et la rejouer à l'identique (tests, speedrun, bugs)
+- [ ] Générateur de nombres aléatoires inspectable (pour la recherche de chromatiques et les tests)
+- [ ] Netcode à rollback pour les combats en ligne (aucune latence ressentie)
+- [ ] Serveurs dédiés open source, auto-hébergeables, chiffrés
+- [ ] Synchronisation des sauvegardes par le nuage du joueur (Google Drive, Dropbox), sans serveur à nous
+- [ ] Tests automatiques : chaque fonction recompilée comparée à l'original à chaque changement (intégration continue)
+- [ ] Profilage intégré : temps par image, mémoire, appels coûteux, pour optimiser les téléphones modestes
+- [ ] Vulkan sur Android, Metal via MoltenVK sur macOS / iOS, et Steam Deck en cible
+- [ ] Économie d'énergie sur téléphone : 30 fps hors combat, résolution adaptative
+- [ ] Langues : toutes les langues des deux jeux dans une seule version, traductions communautaires
+- [ ] API de scripts pour les mods (Lua ou similaire), au-dessus du code fidèle, sans le modifier
+- [ ] Format de sauvegarde ouvert et documenté, avec convertisseur depuis et vers la 3DS
+
 ## Création et mods
 - [ ] Éditeur intégré (cartes, dresseurs, scripts) avec rechargement à chaud
 - [ ] Mods en paquets, installation en un clic
