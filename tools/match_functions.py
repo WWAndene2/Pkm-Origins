@@ -3,7 +3,7 @@
 tools/arm2c.py translates, and whose callees it translates too, is compiled natively and run against the original ARM
 code executed by Unicorn (an ARM CPU emulator, the original instructions themselves) on the same random registers and
 memory, the stack inside it, over the game's own memory from a running game with --ram (writes to it logged on both
-sides, compared, then undone); a function matches when registers r0-r12 and sp, the flags and the whole test memory are
+sides, compared, then undone); a function matches when registers r0-r12 and sp, the flags, the VFP registers and FPSCR's flags and the whole test memory are
 equal after every trial. Its calls run in both: the original callee in Unicorn, the translated one in C.
 
   match_functions.py <code.bin> <functions.tsv> [--trials 200] [--limit N] [--base 0x100000] [--keep DIR]
@@ -17,6 +17,7 @@ import argparse
 import ctypes
 import os
 import random
+import struct
 import subprocess
 import tempfile
 
@@ -24,12 +25,14 @@ from unicorn import UC_ARCH_ARM, UC_HOOK_MEM_WRITE, UC_MODE_ARM, Uc, UcError
 from unicorn.arm_const import (UC_ARM_REG_CPSR, UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
                                UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_R8,
                                UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12, UC_ARM_REG_SP,
-                               UC_ARM_REG_PC)
+                               UC_ARM_REG_PC, UC_ARM_REG_FPEXC, UC_ARM_REG_FPSCR, UC_ARM_REG_S0)
 
 import arm2c
 
 REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6,
         UC_ARM_REG_R7, UC_ARM_REG_R8, UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12]
+# the FPSCR every 3DS thread runs with (Azahar's kernel/thread.cpp): default NaN, flush to zero, round toward zero
+FPSCR = 0x03C00010
 # the random test memory and the return address, away from the game's own memory (heap 0x08000000, stack below
 # 0x10000000, linear heap 0x14000000)
 MB, MS, RET = 0x1F000000, 0x10000, 0x1E000000
@@ -37,10 +40,15 @@ MB, MS, RET = 0x1F000000, 0x10000, 0x1E000000
 # these addresses
 RAM = (("code.bin", 0x00100000), ("heap.bin", 0x08000000), ("linear.bin", 0x14000000), ("stack.bin", 0x0FF00000))
 
+EDGES = [0, 0x80000000, 1, 0x807FFFFF, 0x00800000, 0x7F800000, 0xFF800000, 0x7FC00000, 0x7F800001, 0xFFC00001,
+         0x7F7FFFFF, 0x4F000000, 0xCF000000, 0x4F800000, 0x3F800000, 0xBF000000]
+
 PRELUDE = r"""
 #include <stdint.h>
 #include <string.h>
-typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; } Cpu;
+#include <math.h>
+#include <fenv.h>
+typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; } Cpu;
 /* memory regions: 0 is the random test memory, the others the game's memory (--ram), whose writes are logged (address,
    old byte) so that a trial can be compared on what it wrote and undone after */
 static uint8_t* RP[8]; static uint32_t RB[8], RS[8]; static int NR;
@@ -140,17 +148,18 @@ def main():
         # the trial does not count)
         f.write("static const uint32_t A[] = {%s};\n" % ", ".join("0x%Xu" % s for s, _, _ in funcs))
         f.write("typedef void (*Fn)(Cpu*, uint32_t);\nstatic const Fn T[] = {%s};\n" % ", ".join("f_%08X" % s for s, _, _ in funcs))
-        f.write("void run(int i, Cpu* c) { T[i](c, c->r[14]); }\n")
+        f.write("void run(int i, Cpu* c) { fesetround(FE_TOWARDZERO); T[i](c, c->r[14]); fesetround(FE_TONEAREST); }\n")
         f.write("void call_indirect(Cpu* c, uint32_t t, uint32_t ret) { int lo = 0, hi = %d;"
                 " while (lo < hi) { int m = (lo + hi) / 2; if (A[m] < t) lo = m + 1; else hi = m; }"
                 " if (lo < %d && A[lo] == t) T[lo](c, ret); else c->fault = 4; }\n" % (len(funcs), len(funcs)))
     lib = os.path.join(tmp, "functions.so")
-    subprocess.run(["cc", "-O1", "-shared", "-fPIC", "-w", "-o", lib, src], check=True)
+    subprocess.run(["cc", "-O1", "-shared", "-fPIC", "-w", "-frounding-math", "-ffp-contract=off", "-o", lib, src, "-lm"], check=True)
     so = ctypes.CDLL(lib)
 
     class Cpu(ctypes.Structure):
         _fields_ = [("r", ctypes.c_uint32 * 16), ("n", ctypes.c_uint32), ("z", ctypes.c_uint32), ("c", ctypes.c_uint32),
-                    ("v", ctypes.c_uint32), ("fault", ctypes.c_int), ("steps", ctypes.c_uint32)]
+                    ("v", ctypes.c_uint32), ("fault", ctypes.c_int), ("steps", ctypes.c_uint32),
+                    ("s", ctypes.c_uint32 * 32), ("fpscr", ctypes.c_uint32)]
 
     uc = Uc(UC_ARCH_ARM, UC_MODE_ARM)
     # the game's memory under the test, the same in both: the dump's regions (the program as it ran, its data and bss
@@ -207,11 +216,20 @@ def main():
                     mem[o:o + 4] = (MB + rng.randrange(0, MS - 0x400, 4)).to_bytes(4, "little")
             mem = bytes(mem)
             flags = rng.getrandbits(4)
+            # the VFP registers: any bits, an ordinary float, a small integer (vcvt's input), or a value at a rule's
+            # edge (zeros, denormals, infinities, NaNs, the integer limits)
+            fchoices = [lambda: rng.getrandbits(32), lambda: struct.unpack("<I", struct.pack("<f", rng.uniform(-1e3, 1e3)))[0],
+                        lambda: rng.randrange(0, 256), lambda: rng.choice(EDGES)]
+            fregs = [rng.choice(fchoices)() for _ in range(32)]
+            fflags = rng.getrandbits(4)
             cpu = Cpu()
             for k in range(13):
                 cpu.r[k] = regs[k]
             cpu.r[13], cpu.r[14] = MB + MS - 0x100, RET  # the same stack and return address as Unicorn's
             cpu.n, cpu.z, cpu.c, cpu.v = (flags >> 3) & 1, (flags >> 2) & 1, (flags >> 1) & 1, flags & 1
+            for k in range(32):
+                cpu.s[k] = fregs[k]
+            cpu.fpscr = FPSCR | fflags << 28
             cmem = ctypes.create_string_buffer(mem, MS)
             so.scratch(cmem)
             so.run(idx, ctypes.byref(cpu))
@@ -224,6 +242,10 @@ def main():
                 uc.reg_write(REGS[k], regs[k])
             uc.reg_write(UC_ARM_REG_SP, MB + MS - 0x100)
             uc.reg_write(UC_ARM_REG_LR, RET)
+            uc.reg_write(UC_ARM_REG_FPEXC, 0x40000000)  # VFP on
+            uc.reg_write(UC_ARM_REG_FPSCR, FPSCR | fflags << 28)
+            for k in range(32):
+                uc.reg_write(UC_ARM_REG_S0 + k, fregs[k])
             uc.mem_write(MB, mem)
             written.clear()
             c_wrote = {la[k] for k in range(so.logged())}
@@ -250,10 +272,16 @@ def main():
             cp = uc.reg_read(UC_ARM_REG_CPSR) >> 28
             cr = [cpu.r[k] for k in range(14)]
             cf = (cpu.n << 3) | (cpu.z << 2) | (cpu.c << 1) | cpu.v
+            us = [uc.reg_read(UC_ARM_REG_S0 + k) for k in range(32)]
+            ufp, cfp = uc.reg_read(UC_ARM_REG_FPSCR) >> 28, cpu.fpscr >> 28  # (its sticky exception bits are not kept)
             if ur != cr:
                 bad = "registers: %s" % [(k, hex(ur[k]), hex(cr[k])) for k in range(14) if ur[k] != cr[k]][:3]
             elif cp != cf:
                 bad = "flags: arm %X, c %X" % (cp, cf)
+            elif us != list(cpu.s):
+                bad = "VFP registers: %s" % [(k, hex(us[k]), hex(cpu.s[k])) for k in range(32) if us[k] != cpu.s[k]][:3]
+            elif ufp != cfp:
+                bad = "FPSCR flags: arm %X, c %X" % (ufp, cfp)
             elif bytes(uc.mem_read(MB, MS)) != cmem.raw:
                 bad = "memory"
             elif diff:

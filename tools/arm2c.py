@@ -7,7 +7,7 @@ never translated approximately. Matched against the original by tools/match_func
 
   arm2c.py <code.bin> <address> [--end ADDRESS]      prints the C of one function (or why it is unsupported)
 
-The C uses: typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; } Cpu; and the memory helpers ld8/ld16/ld32,
+The C uses: typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; } Cpu; and the memory helpers ld8/ld16/ld32,
 st8/st16/st32 (tools/match_functions.py defines them: a fault flag instead of undefined behaviour out of the test memory).
 """
 import argparse
@@ -52,6 +52,33 @@ static inline uint32_t shreg(Cpu* c, int kind, uint32_t x, uint32_t s, uint32_t*
     }
 }
 void call_indirect(Cpu* c, uint32_t t, uint32_t ret);
+/* VFP, as the game runs it: FPSCR 0x03C00010 (Azahar's kernel/thread.cpp, as the 3DS kernel sets each thread): default
+   NaN, flush to zero, round toward zero. The registers are bits (s[32]; d[k] is s[2k] low, s[2k+1] high); arithmetic
+   runs on the host's float / double with its rounding set toward zero (match_functions.py: fesetround, compiled with
+   -frounding-math -ffp-contract=off, so nothing is folded or fused), and these helpers add ARM's other two rules: a
+   denormal input or result is a zero of its sign (under round toward zero a result tiny before rounding stays tiny
+   after, so flushing the host's result is ARM's flush), and any NaN result is the default NaN. */
+static inline float F32(uint32_t x) { float f; memcpy(&f, &x, 4); return f; }
+static inline double F64(uint64_t x) { double f; memcpy(&f, &x, 8); return f; }
+static inline uint32_t fz32(uint32_t x) { return (x & 0x7F800000u) == 0 ? x & 0x80000000u : x; }
+static inline uint64_t fz64(uint64_t x) { return (x & 0x7FF0000000000000ull) == 0 ? x & 0x8000000000000000ull : x; }
+static inline float in32(uint32_t x) { return F32(fz32(x)); }
+static inline double in64(uint64_t x) { return F64(fz64(x)); }
+static inline uint32_t out32(float f) { uint32_t x; if (f != f) return 0x7FC00000u; memcpy(&x, &f, 4); return fz32(x); }
+static inline uint64_t out64(double f) { uint64_t x; if (f != f) return 0x7FF8000000000000ull; memcpy(&x, &f, 8); return fz64(x); }
+static inline uint64_t rd64(Cpu* c, int k) { return (uint64_t)c->s[2 * k + 1] << 32 | c->s[2 * k]; }
+static inline void wr64(Cpu* c, int k, uint64_t v) { c->s[2 * k] = (uint32_t)v; c->s[2 * k + 1] = (uint32_t)(v >> 32); }
+/* vcmp: FPSCR's N Z C V (equal 0110, less 1000, greater 0010, unordered 0011) */
+static inline void fcmp(Cpu* c, double x, double y)
+{
+    uint32_t f = x != x || y != y ? 0x3u : x == y ? 0x6u : x < y ? 0x8u : 0x2u;
+    c->fpscr = (c->fpscr & 0x0FFFFFFFu) | f << 28;
+}
+/* vcvt to an integer: toward zero, saturating, NaN to 0 */
+static inline uint32_t f2s(double x) { if (x != x) return 0; if (x >= 2147483647.0) return 0x7FFFFFFFu;
+    if (x <= -2147483648.0) return 0x80000000u; return (uint32_t)(int32_t)x; }
+static inline uint32_t f2u(double x) { if (x != x || x <= 0) return 0; if (x >= 4294967295.0) return 0xFFFFFFFFu;
+    return (uint32_t)x; }
 """
 SHIFT_REG = {7: 0, 8: 1, 6: 2, 9: 3}  # capstone's lsl / lsr / asr / ror by register -> shreg's kind
 
@@ -107,6 +134,159 @@ def static_relocations(cro_dir):
     return frozenset(out)
 
 
+def vfp(i, word, relocated):
+    """the C of one VFP instruction (its condition is added by the caller), or Unsupported"""
+    parts = i.mnemonic.split(".")
+    op = parts[0][:-2] if i.cc not in (0, 15) else parts[0]
+    types = parts[1:]
+    ops = i.operands
+    names = [i.reg_name(o.reg) if o.type == ARM_OP_REG else None for o in ops]
+
+    def sreg(k):
+        n = names[k]
+        if n is None or not re.match(r"s\d+$", n):
+            raise Unsupported("instruction %s" % i.mnemonic)
+        return int(n[1:])
+
+    def dreg(k):
+        n = names[k]
+        if n is None or not re.match(r"d\d+$", n) or int(n[1:]) > 15:
+            raise Unsupported("instruction %s" % i.mnemonic)
+        return int(n[1:])
+
+    def core(k):
+        n = names[k]
+        if n not in REG or REG[n] in (13, 15):
+            raise Unsupported("instruction %s" % i.mnemonic)
+        return REG[n]
+
+    if op in ("vldr", "vstr"):
+        mem = ops[1]
+        if mem.type != ARM_OP_MEM or mem.mem.index:
+            raise Unsupported("instruction %s" % i.mnemonic)
+        double = names[0].startswith("d")
+        k = dreg(0) if double else sreg(0)
+        basereg = i.reg_name(mem.mem.base)
+        d = mem.mem.disp if not mem.subtracted else -mem.mem.disp
+        if basereg == "pc":
+            if op == "vstr":
+                raise Unsupported("instruction %s" % i.mnemonic)
+            t = i.address + 8 + d
+            words = []
+            for x in ((t, t + 4) if double else (t,)):
+                words.append("ld32(c, 0x%Xu)" % x if x in relocated else "0x%Xu" % word(x))
+            if double:
+                return "c->s[%d] = %s; c->s[%d] = %s; if (c->fault) return;" % (2 * k, words[0], 2 * k + 1, words[1])
+            return "c->s[%d] = %s; if (c->fault) return;" % (k, words[0])
+        a = "c->r[%d]%s" % (REG[basereg], (" + 0x%Xu" % d) if d > 0 else (" - 0x%Xu" % -d) if d < 0 else "")
+        if op == "vldr":
+            if double:
+                return ("{ uint32_t a = %s; uint32_t v0 = ld32(c, a), v1 = ld32(c, a + 4u); if (c->fault) return;"
+                        " c->s[%d] = v0; c->s[%d] = v1; }" % (a, 2 * k, 2 * k + 1))
+            return "{ uint32_t v = ld32(c, %s); if (c->fault) return; c->s[%d] = v; }" % (a, k)
+        if double:
+            return ("{ uint32_t a = %s; st32(c, a, c->s[%d]); st32(c, a + 4u, c->s[%d]); if (c->fault) return; }"
+                    % (a, 2 * k, 2 * k + 1))
+        return "st32(c, %s, c->s[%d]); if (c->fault) return;" % (a, k)
+    if op in ("vpush", "vpop", "vldmia", "vstmia", "vldmdb", "vstmdb"):
+        if op in ("vpush", "vpop"):
+            b, regs, wb = 13, names, True
+            mode, load = ("db", False) if op == "vpush" else ("ia", True)
+        else:
+            b, regs, wb = REG[names[0]], names[1:], i.writeback
+            mode, load = op[4:], op.startswith("vld")
+        if b == 15 or mode == "db" and not wb:
+            raise Unsupported("instruction %s" % i.mnemonic)
+        words = []  # the s registers, in memory order
+        for n in regs:
+            if n is None or not re.match(r"[sd]\d+$", n) or n[0] == "d" and int(n[1:]) > 15:
+                raise Unsupported("instruction %s" % i.mnemonic)
+            words += [int(n[1:])] if n[0] == "s" else [2 * int(n[1:]), 2 * int(n[1:]) + 1]
+        size = 4 * len(words)
+        out = ["{ uint32_t a = c->r[%d]%s;" % (b, " - %du" % size if mode == "db" else "")]
+        for k, r in enumerate(words):
+            out.append(" uint32_t v%d = ld32(c, a + %du);" % (k, 4 * k) if load else " st32(c, a + %du, c->s[%d]);" % (4 * k, r))
+        out.append(" if (c->fault) return;")
+        if wb:
+            out.append(" c->r[%d] %s= %du;" % (b, "+" if mode == "ia" else "-", size))
+        if load:
+            out += [" c->s[%d] = v%d;" % (r, k) for k, r in enumerate(words)]
+        return "".join(out) + " }"
+    if op == "vmov":
+        if len(ops) == 2 and names[0] and names[1]:
+            a, b = names
+            if a[0] == "s" and b[0] == "s":
+                return "c->s[%d] = c->s[%d];" % (sreg(0), sreg(1))
+            if a[0] == "d" and b[0] == "d":
+                return "wr64(c, %d, rd64(c, %d));" % (dreg(0), dreg(1))
+            if a[0] == "s":
+                return "c->s[%d] = c->r[%d];" % (sreg(0), core(1))
+            if b[0] == "s":
+                return "c->r[%d] = c->s[%d];" % (core(0), sreg(1))
+        if len(ops) == 3 and names[2] and names[2][0] == "d":  # vmov rt, rt2, dm
+            return "{ uint32_t lo = c->s[%d], hi = c->s[%d]; c->r[%d] = lo; c->r[%d] = hi; }" % (
+                2 * dreg(2), 2 * dreg(2) + 1, core(0), core(1))
+        if len(ops) == 3 and names[0] and names[0][0] == "d":  # vmov dm, rt, rt2
+            return "c->s[%d] = c->r[%d]; c->s[%d] = c->r[%d];" % (2 * dreg(0), core(1), 2 * dreg(0) + 1, core(2))
+        raise Unsupported("instruction vmov form")
+    if op == "vmrs":
+        if names[0] == "apsr_nzcv":
+            return "c->n = c->fpscr >> 31; c->z = (c->fpscr >> 30) & 1; c->c = (c->fpscr >> 29) & 1; c->v = (c->fpscr >> 28) & 1;"
+        raise Unsupported("instruction vmrs")  # the whole FPSCR holds sticky exception bits the C does not keep
+    if not types or types[-1] not in ("f32", "f64") and op != "vcvt":
+        raise Unsupported("instruction %s" % i.mnemonic)
+    if op == "vcvt":
+        to, frm = types
+        dst = dreg(0) if to == "f64" else sreg(0)
+        src = dreg(1) if frm == "f64" else sreg(1)
+        x = "in64(rd64(c, %d))" % src if frm == "f64" else "in32(c->s[%d])" % src if frm == "f32" else \
+            "(int32_t)c->s[%d]" % src if frm == "s32" else "c->s[%d]" % src if frm == "u32" else None
+        if x is None:
+            raise Unsupported("instruction %s" % i.mnemonic)
+        if to == "f64":
+            return "wr64(c, %d, out64((double)%s));" % (dst, x)
+        if to == "f32":
+            return "c->s[%d] = out32((float)%s);" % (dst, x)
+        if to in ("s32", "u32") and frm in ("f32", "f64"):
+            return "c->s[%d] = f2%s((double)%s);" % (dst, to[0], x)
+        raise Unsupported("instruction %s" % i.mnemonic)
+    if len(types) != 1:
+        raise Unsupported("instruction %s" % i.mnemonic)
+    w = 64 if types[0] == "f64" else 32
+    reg = dreg if w == 64 else sreg
+    get = (lambda k: "in64(rd64(c, %d))" % reg(k)) if w == 64 else (lambda k: "in32(c->s[%d])" % reg(k))
+    raw = (lambda k: "rd64(c, %d)" % reg(k)) if w == 64 else (lambda k: "c->s[%d]" % reg(k))
+    put = (lambda v: "wr64(c, %d, %s);" % (reg(0), v)) if w == 64 else (lambda v: "c->s[%d] = %s;" % (reg(0), v))
+    out, T = "out%d" % w, "double" if w == 64 else "float"
+    sign = "0x8000000000000000ull" if w == 64 else "0x80000000u"
+    if op in ("vcmp", "vcmpe"):
+        if len(ops) != 2 or not names[1]:
+            raise Unsupported("instruction %s with zero" % op)
+        return "fcmp(c, %s, %s);" % (get(0), get(1))
+    if op == "vmov":
+        return put(raw(1))
+    if op == "vneg":  # a sign flip, no NaN or denormal handling (ARM's FPNeg)
+        return put("%s ^ %s" % (raw(1), sign))
+    if op == "vabs":
+        return put("%s & ~%s" % (raw(1), sign))
+    if op == "vsqrt":
+        return put("%s(%s(%s))" % (out, "sqrt" if w == 64 else "sqrtf", get(1)))
+    binop = {"vadd": "+", "vsub": "-", "vmul": "*", "vdiv": "/"}
+    if op in binop:
+        return put("%s((%s)(%s %s %s))" % (out, T, get(1), binop[op], get(2)))
+    # the product rounded (and flushed, a NaN made the default one) before it is used: VFP's multiply-accumulate is not
+    # fused; vnmul negates that product's bits (ARM's FPNeg after FPMul: a NaN product comes out as the negated default
+    # NaN). The accumulator's input is flushed as any operand.
+    prod = "%s((%s)(%s * %s))" % (out, T, get(1), get(2))
+    if op == "vnmul":
+        return put("%s ^ %s" % (prod, sign))
+    if op in ("vmla", "vmls", "vnmla", "vnmls"):
+        acc = "in%d(%s%s)" % (w, raw(0), " ^ " + sign if op in ("vnmla", "vnmls") else "")
+        p = "in%d(%s%s)" % (w, prod, " ^ " + sign if op in ("vmls", "vnmla") else "")
+        return put("%s((%s)(%s + %s))" % (out, T, acc, p))
+    raise Unsupported("instruction %s" % i.mnemonic)
+
+
 def translate(code, base, start, end, name, starts=frozenset(), callees=None, relocated=frozenset()):
     """the C of the function at start (to end at most), or Unsupported. starts: the function list, for calls and tail
     calls (b to a start); callees, when given, receives the functions it calls (they must be translated too);
@@ -156,7 +336,9 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         ops = i.operands
         rd = lambda k=0: REG[i.reg_name(ops[k].reg)]
         line = []
-        if base_m == "nop":
+        if m.startswith("v"):
+            line.append(vfp(i, word, relocated))
+        elif base_m == "nop":
             pass
         elif i.address in switches:  # ldr pc, [pc, rN, lsl #2]: a switch over the table after it
             table = switches[i.address]
