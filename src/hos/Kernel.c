@@ -92,6 +92,16 @@ HosResult hos_handle_close(uint32_t handle)
     return HOS_OK;
 }
 
+/* where a block a service makes is when the game maps it at address 0: Azahar maps such a block at its place in the
+   linear heap (the system's part of it); here one after the other past the application's 0x04000000 of it */
+uint32_t hos_memory_block_home(uint32_t size)
+{
+    static uint32_t next = HOS_LINEAR + 0x04000000u;
+    uint32_t at = next;
+    next += (size + 0xFFFu) & ~0xFFFu;
+    return at;
+}
+
 /* the HosThread a Cpu belongs to (the Cpu is its first member) */
 HosThread* hos_thread_of(Cpu* c)
 {
@@ -236,6 +246,45 @@ void hos_svc(Cpu* c, uint32_t n)
         }
         o->timer_due = 0;
         r[0] = HOS_OK;
+        break;
+    case 0x1E: /* CreateMemoryBlock: in r0=other permission, r1=addr, r2=size, r3=my permission; out r0, r1=handle */
+        o = hos_object_new(HOS_MEMORY_BLOCK);
+        o->block_address = r[1]; /* (the game's own memory, shared from where it is) */
+        o->block_size = r[2];
+        r[1] = hos_handle_new(o);
+        hos_object_release(o);
+        r[0] = HOS_OK;
+        break;
+    case 0x1F: { /* MapMemoryBlock: in r0=handle, r1=addr, r2=permissions, r3=other permissions; out r0 */
+        o = hos_handle_get(r[0], t);
+        if (!o || o->kind != HOS_MEMORY_BLOCK) {
+            r[0] = HOS_ERR_INVALID_HANDLE;
+            break;
+        }
+        /* a block a service made, mapped where the game asks, or (address 0) at its home (hos_memory_block_home) */
+        uint32_t at = r[1];
+        if (!at)
+            at = o->block_address ? o->block_address : hos_memory_block_home(o->block_size);
+        if (o->block_address && o->block_address != at) {
+            fprintf(stderr, "hos: a memory block mapped a second place (%08X, then %08X): not done\n", o->block_address, at);
+            c->fault = FAULT_UNKNOWN_SVC;
+            break;
+        }
+        if (hos_memory_map(at, o->block_size)) {
+            r[0] = HOS_ERR_OUT_OF_MEMORY;
+            break;
+        }
+        o->block_address = at;
+        r[0] = HOS_OK;
+        break;
+    }
+    case 0x20: /* UnmapMemoryBlock: in r0=handle, r1=addr; out r0 */
+        o = hos_handle_get(r[0], t);
+        if (!o || o->kind != HOS_MEMORY_BLOCK) {
+            r[0] = HOS_ERR_INVALID_HANDLE;
+            break;
+        }
+        r[0] = HOS_OK; /* (the pages stay: another mapping of the block may still use them) */
         break;
     case 0x21: /* CreateAddressArbiter: out r0, r1=handle */
         o = hos_object_new(HOS_ARBITER);

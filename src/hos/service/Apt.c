@@ -111,10 +111,78 @@ static void applet_utility(HosRequest* q)
     hos_out_static(q, 3, 0, out, output_size < sizeof out ? output_size : sizeof out);
 }
 
+/* the font's internal offsets moved to its address (Azahar's apt/bcfnt/bcfnt.cpp, RelocateSharedFont): the base the
+   file assumed found from FINF's offsets against where the first CMAP / CWDH / TGLP are, then every offset moved */
+static void relocate_font(uint8_t* font, uint32_t address)
+{
+    uint16_t header_size;
+    uint32_t blocks;
+    memcpy(&header_size, font + 0x80 + 6, 2);
+    memcpy(&blocks, font + 0x80 + 0x10, 4);
+    uint32_t assumed_cmap = 0, first_cmap = 0, at = 0x80u + header_size;
+    for (uint32_t b = 0; b < blocks; b++) {
+        uint32_t size;
+        memcpy(&size, font + at + 4, 4);
+        if (!first_cmap && !memcmp(font + at, "CMAP", 4))
+            first_cmap = at;
+        else if (!memcmp(font + at, "FINF", 4)) {
+            memcpy(&assumed_cmap, font + at + 0x1C, 4);
+            assumed_cmap -= 8;
+        }
+        at += size;
+    }
+    uint32_t offset = address - (assumed_cmap - first_cmap);
+    at = 0x80u + header_size;
+    for (uint32_t b = 0; b < blocks; b++) {
+        uint32_t size, v;
+        memcpy(&size, font + at + 4, 4);
+        static const struct { const char* magic; int fields[3]; int keep_zero; } moved[] = {
+            {"FINF", {0x14, 0x18, 0x1C}, 0}, {"CMAP", {0x10, 0, 0}, 1}, {"CWDH", {0x0C, 0, 0}, 1}, {"TGLP", {0x1C, 0, 0}, 0}};
+        for (int k = 0; k < 4; k++)
+            if (!memcmp(font + at, moved[k].magic, 4))
+                for (int f = 0; f < 3 && moved[k].fields[f]; f++) {
+                    memcpy(&v, font + at + moved[k].fields[f], 4);
+                    if (v || !moved[k].keep_zero) /* (a next-section offset of 0 means none) */
+                        v += offset;
+                    memcpy(font + at + moved[k].fields[f], &v, 4);
+                }
+        at += size;
+    }
+}
+
 static void get_shared_font(HosRequest* q)
 {
-    fprintf(stderr, "hos: the game asks for the system font (APT GetSharedFont): not done yet\n");
-    q->thread->cpu.fault = HOS_FAULT_SERVICE;
+    static HosObject* font;
+    if (!font) {
+        extern const char* hos_game_dir;
+        char path[4096];
+        snprintf(path, sizeof path, "%s/shared_font.bin", hos_game_dir);
+        FILE* f = fopen(path, "rb");
+        if (!f) {
+            /* (Azahar's answer without a font: -1, no address, no handle) */
+            fprintf(stderr, "hos: no system font (%s: tools/make_shared_font.py makes it)\n", path);
+            hos_reply(q, 2, 2);
+            hos_out(q, 1, 0xFFFFFFFFu);
+            hos_out(q, 2, 0);
+            uint32_t none = 0;
+            hos_out_handles(q, 3, 0, &none, 1);
+            return;
+        }
+        font = hos_object_new(HOS_MEMORY_BLOCK);
+        font->block_size = 0x332000; /* (Azahar's APT:SharedFont block: 3,272 KiB) */
+        font->block_address = hos_memory_block_home(font->block_size);
+        hos_memory_map(font->block_address, font->block_size);
+        uint8_t* p = hos_pointer(font->block_address);
+        size_t n = fread(p, 1, font->block_size, f);
+        fclose(f);
+        (void)n;
+        relocate_font(p, font->block_address);
+    }
+    uint32_t h = hos_handle_new(font);
+    hos_reply(q, 2, 2);
+    hos_out(q, 1, HOS_OK);
+    hos_out(q, 2, font->block_address);
+    hos_out_handles(q, 3, 0, &h, 1);
 }
 
 static const HosCommandEntry commands[] = {

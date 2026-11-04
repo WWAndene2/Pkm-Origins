@@ -119,6 +119,9 @@ void hos_timers_fire(int64_t now);
 int64_t hos_next_deadline(void);
 void hos_timeouts_fire(int64_t now);
 
+/* a service's memory block's home address (Kernel.c) */
+uint32_t hos_memory_block_home(uint32_t size);
+
 /* the system calls (Kernel.c) */
 void hos_svc(Cpu* c, uint32_t n);
 HosThread* hos_thread_of(Cpu* c);
