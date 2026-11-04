@@ -438,3 +438,180 @@ uint32_t hos_cro_load(uint32_t m, uint32_t size, uint32_t data, uint32_t data_si
     set_field(m, F_FIXED_SIZE, end - m);
     return end - m;
 }
+
+/* unloading (ldr_ro.cpp UnloadCRO; cro_helper.cpp Unregister, Unlink, ClearRelocations, Unrebase) */
+
+static void unregister(uint32_t m, uint32_t crs)
+{
+    uint32_t next_head = field(crs, F_NEXT), previous_head = field(crs, F_PREVIOUS);
+    uint32_t next = field(m, F_NEXT), previous = field(m, F_PREVIOUS);
+    if (m == next_head || m == previous_head) { /* the head removed: the next one heads, pointing at the tail */
+        if (next)
+            set_field(next, F_PREVIOUS, previous);
+        set_field(crs, m == previous_head ? F_PREVIOUS : F_NEXT, next);
+    } else if (next) {
+        set_field(previous, F_NEXT, next);
+        set_field(next, F_PREVIOUS, previous);
+    } else { /* the tail removed */
+        set_field(previous, F_NEXT, 0);
+        if (next_head && field(next_head, F_PREVIOUS) == m)
+            set_field(next_head, F_PREVIOUS, previous);
+        else if (previous_head && field(previous_head, F_PREVIOUS) == m)
+            set_field(previous_head, F_PREVIOUS, previous);
+    }
+    set_field(m, F_NEXT, 0);
+    set_field(m, F_PREVIOUS, 0);
+}
+
+/* the module's own imports pointed back at its on-unresolved function */
+static int reset_imports(uint32_t m)
+{
+    uint32_t unresolved = tag_address(m, field(m, F_ON_UNRESOLVED));
+    static const int tables[3][2] = {{F_IMPORT_NAMED, F_IMPORT_NAMED_NUM}, {F_IMPORT_INDEXED, F_IMPORT_INDEXED_NUM},
+                                     {F_IMPORT_ANONYMOUS, F_IMPORT_ANONYMOUS_NUM}};
+    for (int t = 0; t < 3; t++)
+        for (uint32_t i = 0; i < field(m, tables[t][1]); i++)
+            if (apply_batch(m, r32(entry(m, tables[t][0], i, 8) + 4), unresolved, 1))
+                return -1;
+    return 0;
+}
+
+/* what a loaded module (target) imported from this one, pointed back at target's on-unresolved function */
+static int unexport_from(uint32_t m, uint32_t target)
+{
+    uint32_t unresolved = tag_address(target, field(target, F_ON_UNRESOLVED));
+    uint32_t strings = field(target, F_IMPORT_STRINGS_SIZE);
+    for (uint32_t i = 0; i < field(target, F_IMPORT_NAMED_NUM); i++) {
+        uint32_t e = entry(target, F_IMPORT_NAMED, i, 8);
+        uint32_t batch = r32(e + 4);
+        if (!r8(batch + 6))
+            continue;
+        char name[256];
+        cstr_get(r32(e), strings, name, sizeof name);
+        if (hos_cro_find_export(m, name) && apply_batch(target, batch, unresolved, 1))
+            return -1;
+    }
+    for (uint32_t i = 0; i < field(target, F_IMPORT_MODULE_NUM); i++) {
+        uint32_t e = entry(target, F_IMPORT_MODULES, i, 20);
+        char want[64];
+        cstr_get(r32(e), strings, want, sizeof want);
+        if (!cstr_is(field(m, F_MODULE_NAME), 0xFFFF, want))
+            continue;
+        for (uint32_t j = 0; j < r32(e + 8); j++)
+            if (apply_batch(target, r32(r32(e + 4) + 8 * j + 4), unresolved, 1))
+                return -1;
+        for (uint32_t j = 0; j < r32(e + 16); j++)
+            if (apply_batch(target, r32(r32(e + 12) + 8 * j + 4), unresolved, 1))
+                return -1;
+    }
+    return 0;
+}
+
+static int clear(uint32_t target, uint8_t type)
+{
+    switch (type) {
+    case RELOCATION_NOTHING:
+        return 0;
+    case RELOCATION_ABSOLUTE:
+    case RELOCATION_ABSOLUTE2:
+    case RELOCATION_RELATIVE:
+        w32(target, 0);
+        return 0;
+    default:
+        return -1; /* (Azahar: unimplemented, as for applying them) */
+    }
+}
+
+static int clear_relocations(uint32_t m)
+{
+    int begin = 1;
+    for (uint32_t i = 0; i < field(m, F_EXTERNAL_RELOCATION_NUM); i++) {
+        uint32_t e = entry(m, F_EXTERNAL_RELOCATIONS, i, 12), target = tag_address(m, r32(e));
+        if (!target || clear(target, r8(e + 4)))
+            return -1;
+        if (begin)
+            w8(e + 6, 0);
+        begin = r8(e + 5) != 0;
+    }
+    for (uint32_t i = 0; i < field(m, F_INTERNAL_RELOCATION_NUM); i++) {
+        uint32_t e = entry(m, F_INTERNAL_RELOCATIONS, i, 12), target = tag_address(m, r32(e));
+        if (!target || clear(target, r8(e + 4)))
+            return -1;
+    }
+    return 0;
+}
+
+static void unrebase(uint32_t m)
+{
+    for (uint32_t i = 0; i < field(m, F_IMPORT_ANONYMOUS_NUM); i++) {
+        uint32_t e = entry(m, F_IMPORT_ANONYMOUS, i, 8);
+        if (r32(e + 4))
+            w32(e + 4, r32(e + 4) - m);
+    }
+    for (uint32_t i = 0; i < field(m, F_IMPORT_INDEXED_NUM); i++) {
+        uint32_t e = entry(m, F_IMPORT_INDEXED, i, 8);
+        if (r32(e + 4))
+            w32(e + 4, r32(e + 4) - m);
+    }
+    for (uint32_t i = 0; i < field(m, F_IMPORT_NAMED_NUM); i++) {
+        uint32_t e = entry(m, F_IMPORT_NAMED, i, 8);
+        if (r32(e))
+            w32(e, r32(e) - m);
+        if (r32(e + 4))
+            w32(e + 4, r32(e + 4) - m);
+    }
+    for (uint32_t i = 0; i < field(m, F_IMPORT_MODULE_NUM); i++) {
+        uint32_t e = entry(m, F_IMPORT_MODULES, i, 20);
+        static const uint32_t offsets[3] = {0, 4, 12};
+        for (int k = 0; k < 3; k++)
+            if (r32(e + offsets[k]))
+                w32(e + offsets[k], r32(e + offsets[k]) - m);
+    }
+    for (uint32_t i = 0; i < field(m, F_EXPORT_NAMED_NUM); i++) {
+        uint32_t e = entry(m, F_EXPORT_NAMED, i, 8);
+        if (r32(e))
+            w32(e, r32(e) - m);
+    }
+    for (uint32_t i = 0; i < field(m, F_SEGMENT_NUM); i++) {
+        uint32_t e = entry(m, F_SEGMENTS, i, 12);
+        if (r32(e + 8) == SEGMENT_BSS)
+            w32(e, 0);
+        else if (r32(e))
+            w32(e, r32(e) - m);
+    }
+    set_field(m, F_NEXT, 0);
+    set_field(m, F_PREVIOUS, 0);
+    set_field(m, F_FIXED_SIZE, 0);
+    if (field(m, F_NAME))
+        set_field(m, F_NAME, field(m, F_NAME) - m);
+    for (int f = F_CODE; f < F_FIX0; f += 2)
+        if (field(m, f))
+            set_field(m, f, field(m, f) - m);
+}
+
+int hos_cro_unload(uint32_t m, uint32_t crs)
+{
+    uint32_t magic = field(m, F_MAGIC);
+    if (magic != MAGIC_CRO0 && magic != MAGIC_FIXD)
+        return -1;
+    unregister(m, crs);
+    if (reset_imports(m))
+        return -1;
+    for (uint32_t t = field(crs, F_NEXT); t; t = field(t, F_NEXT)) /* (the auto-linked ones, as the RO service) */
+        if (unexport_from(m, t))
+            return -1;
+    if (magic != MAGIC_FIXD && clear_relocations(m))
+        return -1;
+    unrebase(m);
+    return 0;
+}
+
+uint32_t hos_cro_fixed_size(uint32_t m)
+{
+    return field(m, F_FIXED_SIZE);
+}
+
+void hos_cro_name(uint32_t m, char* out, size_t n)
+{
+    cstr_get(field(m, F_MODULE_NAME), field(m, F_MODULE_NAME_SIZE), out, n);
+}
