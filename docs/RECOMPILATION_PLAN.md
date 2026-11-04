@@ -230,4 +230,12 @@ Performance comes first in every design choice, the more so for the seamless co-
    function not translated yet. Not translated, first reason: callees not translated (7,867 in Omega Ruby), VFP
    (vpush 1,219, vldr 1,016, vldmia), blx to Thumb, mrc (cp15: the thread-local pointer), svc (system calls: the HOS
    layer, step 3 of §3), ldrex / strex, mla.
-   Then: VFP; the system calls into `src/hos/`.
+   VFP added (4 November), as the game runs it: FPSCR 0x03C00010, the value Azahar's kernel gives every thread (default
+   NaN, flush to zero, round toward zero); host float / double rounding toward zero, the flush and the default NaN added
+   by the C, multiply-accumulate not fused; the trials also set random VFP registers (with edge values) and compare them
+   and FPSCR's flags. Omega Ruby **13,133 translated, 10,836 matched, 0 mismatched**, 2,297 with no valid trial; X
+   **12,898 translated, 10,633 matched, 0 mismatched**, 2,265. match_functions.py now draws its random memories once
+   and runs on every CPU: 10 min a game instead of 32. Not translated now, by the functions each reason holds alone
+   (itself and its callers): blx to Thumb 1,184 (Omega Ruby), writes to pc 594, mrc 561, ldrex / strex 520, Thumb 507,
+   loads to pc 489, branches out to no start 459, svc 410, pld 403, mla 298.
+   Then: blx to Thumb (Thumb functions translated), mrc, ldrex / strex; the system calls into `src/hos/`.
