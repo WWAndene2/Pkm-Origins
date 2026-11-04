@@ -362,3 +362,11 @@ Performance comes first in every design choice, the more so for the seamless co-
    (29,824 bytes submitted); its main thread's first 388 system calls equal Azahar's, in order
    (`tools/hos_trace_compare.py`). It then asks for dsp::DSP (step 5). Not done: X run the same way; input; speed not
    measured (it can be once the title screen draws, step 4). Step 4 (the renderer) waits for the owner's discussion.
+7. **Step 4 begun (4 November): finding the graphics library.** `tools/gpu_library.py` marks the functions whose literal
+   pools hold PICA200 command headers (3 or more of the GPU's registers) and walks their callers up. Omega Ruby's .code:
+   37 such writers, then 84, 83 and 45 functions one, two and three calls above; spread over the whole .code
+   (0x106000-0x56D000), not one block. Only 6 of them already have a Pomegrade name (`Gfx_BuildCommandList` 0x33899C,
+   `Gfx_BuildMaterialCommandLists` 0x397CAC, `Gfx_InitAnimChannelBuffer` 0x3800C0...). Not yet found: the code that
+   builds commands from registers or tables (not pool words), the modules' part, and X. Inferred, to check: the models'
+   files (BCH) hold their materials and meshes as ready-made command lists, which the reimplemented library would turn
+   into Vulkan state once, when a model loads, not in every frame.
