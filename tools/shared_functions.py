@@ -221,6 +221,7 @@ def digest(words):
 
 
 SLOTS = {}  # (oras place, x place) -> call_slots: they depend on the two functions only
+EQUIVALENT = [0]  # the agreeing calls of the last check_calls that lead to another copy of the same body
 
 
 def pair_slots(oa, xa, o, x, o_calls, x_calls):
@@ -243,7 +244,7 @@ def call_slots(ow, xw, oc, xc):
     return out
 
 
-def propagate(pairs, o, x, o_calls, x_calls, todo):
+def propagate(pairs, o, x, o_calls, x_calls, todo, banned=frozenset()):
     """Pairs by calls: every pair in todo proposes, for each place its two functions call, the X target for the Omega Ruby
     one; a target neither paired yet takes the X function most of its callers propose (a tie takes none), "repeated"
     when the bodies are equal, else "call" when at least CALL_MIN alike; its own calls are followed in the next round,
@@ -255,7 +256,7 @@ def propagate(pairs, o, x, o_calls, x_calls, todo):
         for oa in todo:
             xa = pairs[oa][0]
             for t, u in pair_slots(oa, xa, o, x, o_calls, x_calls):
-                if t not in pairs and u not in paired_x and t in o and u in x:
+                if t not in pairs and u not in paired_x and t in o and u in x and (t, u) not in banned:
                     votes[t][u] += 1
         new = []
         for t, c in sorted(votes.items()):
@@ -281,11 +282,18 @@ def check_calls(pairs, o, x, o_calls, x_calls):
     to another function; a pair with a contradicting slot gets the kind "<kind>-body" (same body, other calls)."""
     paired_x = {v[0] for v in pairs.values()}
     result = {}
+    equivalent = EQUIVALENT
+    equivalent[0] = 0
     for oa, (xa, kind, r) in list(pairs.items()):
         ok = bad = unpaired = 0
         for t, u in pair_slots(oa, xa, o, x, o_calls, x_calls):
             if t in pairs and pairs[t][0] == u:
                 ok += 1
+            elif t in o and u in x and o[t] == x[u]:
+                # another copy of the same body (Omega Ruby's 003CA31C calls the .code copy 0014849C, X's the DllField
+                # one): the call does the same in both games
+                ok += 1
+                equivalent[0] += 1
             elif t in pairs or u in paired_x:
                 bad += 1
             else:
@@ -409,19 +417,32 @@ def main():
         propagate(pairs, o, x, o_calls, x_calls, forced)
     # a pair resting on likeness or on one call (call, near, prefix) whose own calls contradict the other pairs is not
     # proven: removed, and the calls followed again without it, until none is left
+    # (a removed pair is never made again: without that, the next round remade it and the loop never ended)
     weak = ("call", "near", "prefix")
+    banned = set()
+    callers = collections.defaultdict(set)  # Omega Ruby target -> the pairs that call it
+    rounds = 0
     while True:
         slots = check_calls(pairs, o, x, o_calls, x_calls)
         drop = [k for k, v in slots.items() if v[1] and pairs[k][1].replace("-body", "") in weak]
         for k in pairs:
             pairs[k] = (pairs[k][0], pairs[k][1].replace("-body", ""), pairs[k][2])
+        rounds += 1
+        print("round %d: %d weak pairs contradicted, removed" % (rounds, len(drop)), file=sys.stderr)
         if not drop:
             slots = check_calls(pairs, o, x, o_calls, x_calls)
             break
+        for oa, (xa, _, _) in pairs.items():
+            for t, _ in pair_slots(oa, xa, o, x, o_calls, x_calls):
+                callers[t].add(oa)
         for k in drop:
+            banned.add((k, pairs[k][0]))
             del pairs[k]
-        propagate(pairs, o, x, o_calls, x_calls, list(pairs))
+        # only the functions that call a freed target can propose a new pair for it
+        todo = {c for k in drop for c in callers[k] if c in pairs}
+        propagate(pairs, o, x, o_calls, x_calls, todo, banned)
     ambiguous_o = sum(1 for os_, _ in groups for k in os_ if k not in pairs)
+    print("(%d of the agreeing calls lead to another copy of the same body)" % EQUIVALENT[0])
     print("calls checked: %d agree, %d contradict, %d with a target in no pair; %d pairs found through calls; pairs with a "
           "contradicting call: %d" % (sum(v[0] for v in slots.values()), sum(v[1] for v in slots.values()),
                                        sum(v[2] for v in slots.values()),
