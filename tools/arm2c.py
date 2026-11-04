@@ -31,6 +31,10 @@ COND = {1: "c->z", 2: "!c->z", 3: "c->c", 4: "!c->c", 5: "c->n", 6: "!c->n", 7: 
 SHIFT = {1: "asr", 2: "lsl", 3: "lsr", 4: "ror"}
 
 
+# the most bytes of one function the translators read (the game's longest: Omega Ruby's 001586A8, 20,172)
+MAX_FUNCTION = 0x10000
+
+
 class Unsupported(Exception):
     pass
 
@@ -122,6 +126,8 @@ def operand2(md_insn, op, want_carry):
         return "shreg(c, %d, %s, c->r[%d], &sk)" % (SHIFT_REG[t], r, s), "sk"
     if t == 5:  # rrx: the carry in at the top, bit 0 out
         return "((c->c << 31) | (%s >> 1))" % r, "(%s & 1)" % r
+    if n == 32 and t in (1, 3):  # lsr / asr #32 (encoded as #0): all out; the carry is bit 31
+        return ("0u" if t == 3 else "(uint32_t)((int32_t)%s >> 31)" % r), "(%s >> 31)" % r
     if t not in SHIFT or not 0 < n < 32:
         raise Unsupported("shift form")
     kind = SHIFT[t]
@@ -154,7 +160,10 @@ def static_relocations(cro_dir):
 ARITH = {"mla", "mls", "umull", "smull", "umlal", "smlal", "mlas", "umulls", "smulls",
          "smulbb", "smulbt", "smultb", "smultt", "smulwb", "smulwt", "smlabb", "smlabt", "smlatb", "smlatt", "smlawb",
          "smlawt", "smlalbb", "smlalbt", "smlaltb", "smlaltt", "clz", "rev", "rev16", "revsh", "pld", "usat", "ssat",
-         "qadd", "qsub", "uxtab", "uxtah", "sxtab", "sxtah", "pkhbt", "pkhtb", "uqsub8", "uqsub16", "uqadd8", "uqadd16"}
+         "qadd", "qsub", "uxtab", "uxtah", "sxtab", "sxtah", "pkhbt", "pkhtb", "uqsub8", "uqsub16", "uqadd8", "uqadd16",
+         "smlad", "smladx", "smuad", "smuadx", "uxtb16", "uxtab16", "qdadd", "qdsub",
+         "qadd16", "qsub16", "smusd", "smusdx", "usat16", "uhadd8",
+         "ssat16", "qasx", "qsax", "sadd16", "ssub16", "sasx", "ssax"}
 
 
 def arith(i, op, flags):
@@ -170,6 +179,66 @@ def arith(i, op, flags):
     R = lambda k: "c->r[%d]" % regs[k]
     nz = " c->n = v >> 31; c->z = v == 0;" if flags else ""
     half = lambda r, top: "(int32_t)(int16_t)(%s >> 16)" % r if top else "(int32_t)(int16_t)%s" % r
+    if op in ("qadd16", "qsub16"):  # each signed halfword, saturated
+        lanes = []
+        for k in (0, 16):
+            e = "((int32_t)(int16_t)(%s >> %d) %s (int32_t)(int16_t)(%s >> %d))" % (R(1), k, "+" if op == "qadd16" else "-",
+                                                                                 R(2), k)
+            lanes.append("(((uint32_t)(%s > 32767 ? 32767 : %s < -32768 ? -32768 : %s) & 0xFFFFu) << %d)" % (e, e, e, k))
+        return "c->r[%d] = %s;" % (regs[0], " | ".join(lanes))
+    if op in ("qasx", "qsax", "sasx", "ssax", "sadd16", "ssub16"):
+        # per signed halfword: (low, high) of rn with rm's (asx: high + low, low - high; sax: the other way), saturated
+        # for q; the GE flags the s forms set are not kept: only sel reads them, and neither game has one
+        lo_n, hi_n = "(int32_t)(int16_t)%s" % R(1), "(int32_t)(int16_t)(%s >> 16)" % R(1)
+        lo_m, hi_m = "(int32_t)(int16_t)%s" % R(2), "(int32_t)(int16_t)(%s >> 16)" % R(2)
+        lo, hi = {"qasx": ("%s - %s" % (lo_n, hi_m), "%s + %s" % (hi_n, lo_m)),
+                  "sasx": ("%s - %s" % (lo_n, hi_m), "%s + %s" % (hi_n, lo_m)),
+                  "qsax": ("%s + %s" % (lo_n, hi_m), "%s - %s" % (hi_n, lo_m)),
+                  "ssax": ("%s + %s" % (lo_n, hi_m), "%s - %s" % (hi_n, lo_m)),
+                  "sadd16": ("%s + %s" % (lo_n, lo_m), "%s + %s" % (hi_n, hi_m)),
+                  "ssub16": ("%s - %s" % (lo_n, lo_m), "%s - %s" % (hi_n, hi_m))}[op]
+        sat = (lambda e: "((%s) > 32767 ? 32767 : (%s) < -32768 ? -32768 : (%s))" % (e, e, e)) if op[0] == "q" else \
+            (lambda e: "(%s)" % e)
+        return "c->r[%d] = ((uint32_t)%s & 0xFFFFu) | (((uint32_t)%s & 0xFFFFu) << 16);" % (regs[0], sat(lo), sat(hi))
+    if op == "ssat16":  # each signed halfword clamped to [-2^(n-1), 2^(n-1) - 1]
+        n = ops[1].imm
+        lo_, hi_ = -(1 << (n - 1)), (1 << (n - 1)) - 1
+        lanes = ["(((uint32_t)(%s < %d ? %d : %s > %d ? %d : %s) & 0xFFFFu) << %d)" % (e, lo_, lo_, e, hi_, hi_, e, k)
+                 for k, e in ((0, "(int32_t)(int16_t)%s" % R(2)), (16, "(int32_t)(int16_t)(%s >> 16)" % R(2)))]
+        return "c->r[%d] = %s;" % (regs[0], " | ".join(lanes))
+    if op in ("smusd", "smusdx"):  # low product minus high product
+        m_ = "((%s >> 16) | (%s << 16))" % (R(2), R(2)) if op.endswith("x") else R(2)
+        return "{ uint32_t m_ = %s; c->r[%d] = (uint32_t)(%s * %s - %s * %s); }" % (
+            m_, regs[0], half(R(1), False), half("m_", False), half(R(1), True), half("m_", True))
+    if op == "usat16":  # each signed halfword clamped to [0, 2^n - 1]
+        n = ops[1].imm
+        hi = (1 << n) - 1
+        lanes = ["(((uint32_t)(%s < 0 ? 0 : %s > %d ? %d : %s)) << %d)" % ((e,) * 2 + (hi, hi, e, k)) for k, e in
+                 ((0, "(int32_t)(int16_t)%s" % R(2)), (16, "(int32_t)(int16_t)(%s >> 16)" % R(2)))]
+        return "c->r[%d] = %s;" % (regs[0], " | ".join(lanes))
+    if op == "uhadd8":  # each byte: (a + b) / 2
+        lanes = ["((((%s >> %d) & 0xFFu) + ((%s >> %d) & 0xFFu)) >> 1 << %d)" % (R(1), k, R(2), k, k) for k in (0, 8, 16, 24)]
+        return "c->r[%d] = %s;" % (regs[0], " | ".join(lanes))
+    if op in ("smlad", "smladx", "smuad", "smuadx"):  # two signed halfword products added (x: rm's halves swapped)
+        m_ = "((%s >> 16) | (%s << 16))" % (R(2), R(2)) if op.endswith("x") else R(2)
+        acc = " + %s" % R(3) if op.startswith("smla") else ""
+        return "{ uint32_t m_ = %s; c->r[%d] = (uint32_t)(%s * %s + %s * %s)%s; }" % (
+            m_, regs[0], half(R(1), False), half("m_", False), half(R(1), True), half("m_", True), acc)
+    if op in ("uxtb16", "uxtab16"):
+        src = ops[-1]
+        r = R(len(ops) - 1)
+        if src.shift.type == 4 and src.shift.value:
+            r = "((%s >> %d) | (%s << %d))" % (r, src.shift.value, r, 32 - src.shift.value)
+        elif src.shift.type:
+            raise Unsupported("instruction %s form" % op)
+        if op == "uxtb16":
+            return "c->r[%d] = %s & 0x00FF00FFu;" % (regs[0], r)
+        return ("{ uint32_t x = %s, n_ = %s; c->r[%d] = ((n_ + (x & 0xFFu)) & 0xFFFFu) | ((((n_ >> 16) + ((x >> 16) & 0xFFu))"
+                " & 0xFFFFu) << 16); }" % (r, R(1), regs[0]))
+    if op in ("qdadd", "qdsub"):  # rd = sat(rm +- sat(2 * rn))
+        sat = lambda e: "(%s > 2147483647LL ? 2147483647LL : %s < -2147483648LL ? -2147483648LL : %s)" % (e, e, e)
+        return "{ int64_t d = %s; int64_t x = (int64_t)(int32_t)%s %s d; c->r[%d] = (uint32_t)(int32_t)%s; }" % (
+            sat("2 * (int64_t)(int32_t)%s" % R(2)), R(1), "+" if op == "qdadd" else "-", regs[0], sat("x"))
     if op in ("mla", "mls"):
         return "{ uint32_t v = %s %s %s * %s; c->r[%d] = v;%s }" % (R(3), "+" if op == "mla" else "-", R(1), R(2),
                                                                   regs[0], nz)
@@ -382,18 +451,19 @@ def vfp(i, word, relocated):
     if op == "vmov":
         if len(ops) == 2 and names[0] and names[1]:
             a, b = names
-            if a[0] == "s" and b[0] == "s":
+            fs, fd = (lambda n: re.match(r"s\d+$", n)), (lambda n: re.match(r"d\d+$", n))  # (sb, sl, sp are core)
+            if fs(a) and fs(b):
                 return "c->s[%d] = c->s[%d];" % (sreg(0), sreg(1))
-            if a[0] == "d" and b[0] == "d":
+            if fd(a) and fd(b):
                 return "wr64(c, %d, rd64(c, %d));" % (dreg(0), dreg(1))
-            if a[0] == "s":
+            if fs(a):
                 return "c->s[%d] = c->r[%d];" % (sreg(0), core(1))
-            if b[0] == "s":
+            if fs(b):
                 return "c->r[%d] = c->s[%d];" % (core(0), sreg(1))
-        if len(ops) == 3 and names[2] and names[2][0] == "d":  # vmov rt, rt2, dm
+        if len(ops) == 3 and names[2] and re.match(r"d\d+$", names[2]):  # vmov rt, rt2, dm
             return "{ uint32_t lo = c->s[%d], hi = c->s[%d]; c->r[%d] = lo; c->r[%d] = hi; }" % (
                 2 * dreg(2), 2 * dreg(2) + 1, core(0), core(1))
-        if len(ops) == 3 and names[0] and names[0][0] == "d":  # vmov dm, rt, rt2
+        if len(ops) == 3 and names[0] and re.match(r"d\d+$", names[0]):  # vmov dm, rt, rt2
             return "c->s[%d] = c->r[%d]; c->s[%d] = c->r[%d];" % (2 * dreg(0), core(1), 2 * dreg(0) + 1, core(2))
         raise Unsupported("instruction vmov form")
     if op == "vmrs":
@@ -523,18 +593,21 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         insns.append(got[0])
         a += got[0].size
     end_code = insns[-1].address + insns[-1].size if insns else start
-    addresses = [x.address for x in insns]
+    computed = []
 
     def jump(expr):
         """a computed jump (add pc, ... / mov pc, rN / ldr pc, ...): to any instruction of this function by a switch
         on the target, else out of it as a tail call through call_indirect (lr checked as at a return)"""
         if thumb:
             raise Unsupported("computed jump in Thumb")
-        targets.update(addresses)
-        return ("{ uint32_t t = %s; switch (t - %s) { %s default: break; } if (c->r[14] != ret) { c->fault = 3; return; }"
-                " call_indirect(c, t, ret); return; }" % (expr, ADDR(0), " ".join(
-                    "case 0x%Xu: goto L%X;" % (x, x) for x in addresses)))
+        computed.append(True)
+        # (the cases: every instruction translated, filled in once the function is: code past its last return, which
+        # only such a jump could reach, is not decoded, as data may follow; a jump there is a tail call through
+        # call_indirect, which faults (4) when nothing is translated there)
+        return ("{ uint32_t t = %s; switch (t - %s) { @CASES@ default: break; } if (c->r[14] != ret) { c->fault = 3;"
+                " return; } call_indirect(c, t, ret); return; }" % (expr, ADDR(0)))
     body, targets, returned = [], set(), False
+    unsupported = []  # the instructions with no C (a stop each)
     for i in insns:
         m = i.mnemonic
         base_m = m[:-2] if i.cc not in (0, 15) else m  # the condition suffix (bxne, addseq)
@@ -542,357 +615,376 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         ops = i.operands
         rd = lambda k=0: REG[i.reg_name(ops[k].reg)]
         line = []
-        if m.startswith("v"):
-            line.append(vfp(i, word, relocated))
-        elif base_m == "svc":
-            line.append("hos_svc(c, 0x%Xu); if (c->fault) return;" % (ops[0].imm & 0xFFFFFF))
-        elif base_m in ARITH:
-            line.append(arith(i, base_m, i.cc in (0, 15) and m.endswith("s") or i.cc not in (0, 15) and m[:-2].endswith("s")))
-        elif base_m in ("mrc", "mcr"):
-            line.append(coprocessor(i, base_m))
-        elif base_m in EXCLUSIVE or base_m == "clrex":
-            line.append(exclusive(i, base_m))
-        elif base_m == "nop":
-            pass
-        elif i.address in switches:  # ldr pc, [pc, rN, lsl #2]: a switch over the table after it
-            table = switches[i.address]
-            idx = REG[i.reg_name(ops[1].mem.index)]
-            targets.update(table)
-            line.append("switch (c->r[%d]) { %s default: c->fault = 5; return; }"
-                        % (idx, " ".join("case %d: goto L%X;" % (k, t) for k, t in enumerate(table))))
-        elif base_m == "bx" and i.reg_name(ops[0].reg) == "lr":
-            # the C returns to its caller: right only when lr is the address this function got (a shared epilogue pops
-            # lr from the stack: X's 00205E20); otherwise fault 3, never a silent other path
-            line.append("if (c->r[14] != ret) { c->fault = 3; return; } return;")
-            returned = i.cc in (0, 15)
-        elif base_m == "bx" and ops[0].type == ARM_OP_REG:  # a jump through a register: the function it lands in returns
-            line.append("{ uint32_t t = c->r[%d]; if (c->r[14] != ret) { c->fault = 3; return; } call_indirect(c, t, ret); "
-                        "return; }" % rd())  # for this one (lr checked as at bx lr)
-            returned = i.cc in (0, 15)
-        elif base_m == "blx" and ops[0].type == ARM_OP_REG:  # an indirect call (virtual methods, function pointers)
-            lr = (i.address + i.size) | thumb
-            line.append("{ uint32_t t = c->r[%d]; c->r[14] = %s; call_indirect(c, t, %s); if (c->fault) return; }"
-                        % (rd(), ADDR(lr), ADDR(lr)))
-        elif base_m in ("bl", "blx") and ops[0].type == ARM_OP_IMM:  # blx #imm: a call that switches instruction set
-            t = ops[0].imm & 0xFFFFFFFF
-            to_thumb = thumb != (base_m == "blx")
-            if to_thumb is False:
-                t &= ~3  # (a Thumb blx's target is word-aligned)
-            if not is_start(t, to_thumb):
-                raise Unsupported("call to a target that is no function start")
-            callees.add(t)
-            lr = (i.address + i.size) | thumb
-            line.append("c->r[14] = %s; %s(c, %s); if (c->fault) return;" % (ADDR(lr), fname(t, module), ADDR(lr)))
-        elif base_m == "b":
-            t = ops[0].imm
-            if start <= t < end_code:
-                targets.add(t)
-                line.append("goto L%X;" % t)
-            elif is_start(t, thumb) or entries is not None:  # a tail call: the callee returns for this function
-                # (a target that is no start is inside another function: code the compiler shares between functions,
-                # one function's tail jumped into from others; it is translated as its own entry, from there to the
-                # end of the function holding it, by the caller of translate: entries receives it)
-                if not is_start(t, thumb):
-                    entries.add(t)
-                callees.add(t)
-                # (it returns where this one would, to lr: so lr must be that address, as at bx lr)
-                line.append("if (c->r[14] != ret) { c->fault = 3; return; } %s(c, ret); return;" % fname(t, module))
-                returned = i.cc in (0, 15)
-            else:
-                raise Unsupported("branch out of the function to no function start")
-        elif base_m in MULTI and not re.match(r"[sd]\d+$", i.reg_name(ops[0].reg)) or base_m in ("push", "pop"):
-            mode, wb, load = MULTI[base_m]
-            if base_m in ("push", "pop"):
-                b, regs, wb = 13, [REG[i.reg_name(o.reg)] for o in ops], True
-            else:
-                b, regs, wb = REG[i.reg_name(ops[0].reg)], [REG[i.reg_name(o.reg)] for o in ops[1:]], i.writeback
-            if any(re.match(r"[sd]\d+$", i.reg_name(o.reg)) for o in ops):
-                raise Unsupported("instruction v%s" % base_m)
-            if b == 15 or wb and b in regs or "^" in i.op_str or not load and 15 in regs or load and 13 in regs:
-                raise Unsupported("ldm / stm form")
-            n = len(regs)
-            first = {"ia": "", "ib": " + 4u", "da": " - %du" % (4 * n - 4), "db": " - %du" % (4 * n)}[mode]
-            line.append("{ uint32_t a = c->r[%d]%s;" % (b, first))
-            for k, r in enumerate(sorted(regs)):
-                if load:
-                    line.append(" uint32_t v%d = ld32(c, a + %du);" % (k, 4 * k))
-                else:
-                    line.append(" st32(c, a + %du, c->r[%d]);" % (4 * k, r))
-            line.append(" if (c->fault) return;")
-            if wb:
-                line.append(" c->r[%d] %s= %du;" % (b, "+" if mode in ("ia", "ib") else "-", 4 * n))
-            if load:
-                for k, r in enumerate(sorted(regs)):
-                    line.append(" c->r[%d] = v%d;" % (r, k))
-            line.append(" }")
-            if load and 15 in regs:
-                # the popped pc must be the return address this function got: a test whose stores overwrote it has no
-                # meaning (the original would jump elsewhere); fault 3 makes the trial invalid
-                line.append(" if (c->r[15] != ret) { c->fault = 3; return; } return;")
-                returned = i.cc in (0, 15)
-        elif thumb and base_m in ("lsl", "lsr", "asr", "ror") and len(ops) == 2 and ops[1].type == ARM_OP_REG:
-            # Thumb's lsls rd, rs: rd shifted by rs
-            kind = {"lsl": 0, "lsr": 1, "asr": 2, "ror": 3}[base_m]
-            line.append("{ uint32_t k, v = shreg(c, %d, c->r[%d], c->r[%d], &k); c->r[%d] = v;"
-                        % (kind, rd(), REG[i.reg_name(ops[1].reg)], rd()))
-            if i.update_flags:
-                line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
-            line.append(" (void)k; }")
-        elif base_m in ("lsl", "lsr", "asr", "ror", "rrx") and len(ops) == 2:  # capstone's alias of mov rd, rm, <shift>
-            if rd() == 15:
-                raise Unsupported("write to pc")
-            if base_m == "rrx":  # capstone gives rrx with no shift on its operand: the carry in at the top, bit 0 out
-                src = "c->r[%d]" % REG[i.reg_name(ops[1].reg)]
-                e, carry = "((c->c << 31) | (%s >> 1))" % src, "(%s & 1)" % src
-            else:
-                e, carry = operand2(i, ops[1], i.update_flags)
-            # the carry out read before rd is written (rd may be the shifted register: lsrs r0, r0, #8)
-            line.append("{ uint32_t sk; uint32_t v = %s; uint32_t k = %s; c->r[%d] = v; (void)sk; (void)k;"
-                        % (e, carry if carry else "c->c", rd()))
-            if i.update_flags:
-                line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
-            line.append(" }")
-        elif base_m in ("lsl", "lsr", "asr", "ror") and len(ops) == 3 and ops[2].type == ARM_OP_REG:
-            if rd() == 15 or REG[i.reg_name(ops[2].reg)] == 15:
-                raise Unsupported("shift form")
-            kind = {"lsl": 0, "lsr": 1, "asr": 2, "ror": 3}[base_m]
-            line.append("{ uint32_t k, v = shreg(c, %d, c->r[%d], c->r[%d], &k); c->r[%d] = v;"
-                        % (kind, REG[i.reg_name(ops[1].reg)], REG[i.reg_name(ops[2].reg)], rd()))
-            if i.update_flags:
-                line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
-            line.append(" (void)k; }")
-        elif base_m in ("lsl", "lsr", "asr", "ror") and len(ops) == 3 and ops[2].type == ARM_OP_IMM:
-            n = ops[2].imm
-            if rd() == 15 or not 0 < n < 32:
-                raise Unsupported("shift form")
-            r = "c->r[%d]" % REG[i.reg_name(ops[1].reg)]
-            e = {"lsl": "(%s << %d)" % (r, n), "lsr": "(%s >> %d)" % (r, n), "asr": "(uint32_t)((int32_t)%s >> %d)" % (r, n),
-                 "ror": "((%s >> %d) | (%s << (32 - %d)))" % (r, n, r, n)}[base_m]
-            carry = "((%s >> %d) & 1)" % (r, 32 - n) if base_m == "lsl" else "((%s >> %d) & 1)" % (r, n - 1)
-            line.append("{ uint32_t k = %s, v = %s; c->r[%d] = v;" % (carry, e, rd()))
-            if i.update_flags:
-                line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
-            line.append(" (void)k; }")
-        elif base_m in ("mov", "mvn") and rd() == 15:
-            if base_m == "mov" and ops[1].type == ARM_OP_REG and i.reg_name(ops[1].reg) == "lr" and not ops[1].shift.type \
-                    and not i.update_flags:  # mov pc, lr: a return (ARMv4's)
+        try:
+            if m.startswith("v"):
+                line.append(vfp(i, word, relocated))
+            elif base_m == "svc":
+                line.append("hos_svc(c, 0x%Xu); if (c->fault) return;" % (ops[0].imm & 0xFFFFFF))
+            elif base_m == "mrs" and i.op_str.replace(" ", "") in ("%s,apsr" % i.reg_name(ops[0].reg), "%s,cpsr" % i.reg_name(ops[0].reg)):
+                # the flags read as a word: N Z C V in bits 31-28; the mode bits of user mode (0x10); Q and GE, which the C
+                # does not keep, read as 0 (a game that set them would show it in the matching: Unicorn keeps them)
+                line.append("c->r[%d] = c->n << 31 | c->z << 30 | c->c << 29 | c->v << 28 | 0x10u;" % rd())
+            elif base_m == "msr" and i.op_str.replace(" ", "").split(",")[0] in ("apsr_nzcvq", "apsr_nzcv", "cpsr_f") \
+                    and ops[-1].type == ARM_OP_REG:
+                # the flags written from a word (bits 31-28); Q, which the C does not keep, dropped
+                line.append("{ uint32_t x = c->r[%d]; c->n = x >> 31; c->z = (x >> 30) & 1; c->c = (x >> 29) & 1;"
+                            " c->v = (x >> 28) & 1; }" % REG[i.reg_name(ops[-1].reg)])
+            elif base_m in ARITH:
+                line.append(arith(i, base_m, i.cc in (0, 15) and m.endswith("s") or i.cc not in (0, 15) and m[:-2].endswith("s")))
+            elif base_m in ("mrc", "mcr"):
+                line.append(coprocessor(i, base_m))
+            elif base_m in EXCLUSIVE or base_m == "clrex":
+                line.append(exclusive(i, base_m))
+            elif base_m == "nop":
+                pass
+            elif i.address in switches:  # ldr pc, [pc, rN, lsl #2]: a switch over the table after it
+                table = switches[i.address]
+                idx = REG[i.reg_name(ops[1].mem.index)]
+                targets.update(table)
+                line.append("switch (c->r[%d]) { %s default: c->fault = 5; return; }"
+                            % (idx, " ".join("case %d: goto L%X;" % (k, t) for k, t in enumerate(table))))
+            elif base_m == "bx" and i.reg_name(ops[0].reg) == "lr":
+                # the C returns to its caller: right only when lr is the address this function got (a shared epilogue pops
+                # lr from the stack: X's 00205E20); otherwise fault 3, never a silent other path
                 line.append("if (c->r[14] != ret) { c->fault = 3; return; } return;")
-            elif i.update_flags:
-                raise Unsupported("write to pc with flags (an exception return)")
-            else:
-                e, _ = operand2(i, ops[1], False)
-                line.append("{ uint32_t sk; (void)sk; %s }" % jump(e if base_m == "mov" else "~(%s)" % e))
-            returned = i.cc in (0, 15)
-        elif base_m in ("mov", "mvn"):
-            if rd() == 13:
-                raise Unsupported("sp set from a register (a stack switch: 00123768 restores a saved context)")
-            e, carry = operand2(i, ops[1], i.update_flags)
-            v = e if base_m == "mov" else "~(%s)" % e
-            line.append("{ uint32_t sk; uint32_t v = %s; uint32_t k = %s; c->r[%d] = v; (void)sk; (void)k;"
-                        % (v, carry if carry else "c->c", rd()))  # (the carry read before rd is written)
-            if i.update_flags:
-                line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
-            line.append(" }")
-        elif base_m == "adr":  # an address, known here
-            if rd() == 15:
-                raise Unsupported("write to pc")
-            line.append("c->r[%d] = %s;" % (rd(), ADDR(pc_of(i.address) + ops[1].imm)))
-        elif base_m in ("add", "sub", "rsb", "adc", "sbc", "rsc", "cmp", "cmn", "and", "orr", "eor", "bic", "tst", "teq"):
-            compare = base_m in ("cmp", "cmn", "tst", "teq")
-            if not compare and len(ops) == 2:  # Thumb's two-operand form: adds rd, rm / add sp, #k is rd = rd op ...
-                ops = [ops[0], ops[0], ops[1]]
-            logical = base_m in ("and", "orr", "eor", "bic", "tst", "teq")
-            dst = None if compare else rd()
-            to_pc = dst == 15
-            if to_pc:  # a computed jump (a table of cases: add pc, r5, r6), its target computed as rd would be
-                if (m[:-2] if i.cc not in (0, 15) else m).endswith("s") or thumb:
-                    raise Unsupported("write to pc with flags (an exception return)" if not thumb else "write to pc")
-                dst = 16  # (a scratch: c->r[16] does not exist; the value goes to the jump below)
-            if dst == 13 and not (base_m in ("add", "sub") and i.reg_name(ops[1].reg) == "sp"
-                                  and ops[2].type == ARM_OP_IMM):
-                raise Unsupported("sp set from a register (a stack switch: 00123768 restores a saved context)")
-            a_op, b_op = (ops[0], ops[1]) if compare else (ops[1], ops[2] if len(ops) > 2 else None)
-            if b_op is None:
-                raise Unsupported("two-operand form")
-            pc_first = i.reg_name(a_op.reg) == "pc"
-            if pc_first and base_m in ("add", "sub") and not compare and not i.update_flags and b_op.type == ARM_OP_IMM \
-                    and not to_pc:  # add / sub rX, pc, #k: an address, known here
-                v = (pc_of(i.address) + (b_op.imm if base_m == "add" else -b_op.imm)) & 0xFFFFFFFF
-                body.append((i.address, "    /* %08X %s %s */ %s" % (
-                    i.address, m, i.op_str, ("if (%s) { c->r[%d] = %s; }" % (COND[i.cc], dst, ADDR(v))) if i.cc not in (0, 15)
-                    else "c->r[%d] = %s;" % (dst, ADDR(v)))))
-                continue
-            # (pc as the first operand otherwise: its value, the instruction's address + 8, or + 4 in Thumb)
-            ra = ADDR(i.address + (4 if thumb else 8)) if pc_first else "c->r[%d]" % REG[i.reg_name(a_op.reg)]
-            # (from the mnemonic: capstone reports update_flags for adc / sbc with no s, as they read the carry)
-            flags = compare or (m[:-2] if i.cc not in (0, 15) else m).endswith("s")
-            e, carry = operand2(i, b_op, flags and logical)
-            x, y = (e, ra) if base_m in ("rsb", "rsc") else (ra, e)
-            line.append("{ uint32_t sk; uint32_t x = %s, y = %s, v; (void)sk;" % (x, y))
-            if base_m in ("add", "cmn"):
-                line.append(" v = x + y;")
-                if flags:
-                    line.append(" c->c = v < x; c->v = ((~(x ^ y) & (x ^ v)) >> 31);")
-            elif base_m == "adc":
-                line.append(" uint64_t w = (uint64_t)x + y + c->c; v = (uint32_t)w;")
-                if flags:
-                    line.append(" c->c = (uint32_t)(w >> 32); c->v = ((~(x ^ y) & (x ^ v)) >> 31);")
-            elif base_m in ("sbc", "rsc"):  # x - y - not carry
-                line.append(" uint64_t w = (uint64_t)x + (uint32_t)~y + c->c; v = (uint32_t)w;")
-                if flags:
-                    line.append(" c->c = (uint32_t)(w >> 32); c->v = (((x ^ y) & (x ^ v)) >> 31);")
-            elif base_m in ("sub", "rsb", "cmp"):
-                line.append(" v = x - y;")
-                if flags:
-                    line.append(" c->c = x >= y; c->v = (((x ^ y) & (x ^ v)) >> 31);")
-            else:
-                op = {"and": "x & y", "tst": "x & y", "orr": "x | y", "eor": "x ^ y", "teq": "x ^ y", "bic": "x & ~y"}[base_m]
-                line.append(" v = %s;" % op)
-                if flags and carry:
-                    line.append(" c->c = %s;" % carry)
-            if flags:
-                line.append(" c->n = v >> 31; c->z = v == 0;")
-            if to_pc:
-                line.append(" %s" % jump("v"))
                 returned = i.cc in (0, 15)
-            elif not compare:
-                line.append(" c->r[%d] = v;" % dst)
-            line.append(" }")
-        elif base_m in ("uxtb", "uxth", "sxtb", "sxth") and len(ops) == 2:
-            src = ops[1]
-            if rd() == 15 or src.shift.type not in (0, 4):
-                raise Unsupported("extend form")
-            r = "c->r[%d]" % REG[i.reg_name(src.reg)]
-            if src.shift.type == 4 and src.shift.value:  # ror #8 / #16 / #24 first
-                n = src.shift.value
-                r = "((%s >> %d) | (%s << %d))" % (r, n, r, 32 - n)
-            cast = {"uxtb": "(uint32_t)(uint8_t)", "uxth": "(uint32_t)(uint16_t)", "sxtb": "(uint32_t)(int8_t)",
-                    "sxth": "(uint32_t)(int16_t)"}[base_m]
-            line.append("c->r[%d] = %s%s;" % (rd(), cast, r))
-        elif base_m == "mul":  # (muls sets N and Z; on ARMv6 C and V are kept)
-            src = [REG[i.reg_name(o.reg)] for o in ops[1:]] if len(ops) == 3 else [rd(), REG[i.reg_name(ops[1].reg)]]
-            line.append("{ uint32_t v = c->r[%d] * c->r[%d]; c->r[%d] = v;" % (src[0], src[1], rd()))
-            if i.update_flags:
-                line.append(" c->n = v >> 31; c->z = v == 0;")
-            line.append(" }")
-        elif base_m in ("ldrd", "strd"):  # two words: rt at the address, rt2 at + 4
-            rt, rt2, mem = REG[i.reg_name(ops[0].reg)], REG[i.reg_name(ops[1].reg)], ops[2]
-            basereg = i.reg_name(mem.mem.base)
-            post = len(ops) > 3
-            if mem.type != ARM_OP_MEM or 15 in (rt, rt2) or base_m == "ldrd" and 13 in (rt, rt2) or mem.mem.index or \
-                    (i.writeback or post) and (basereg == "pc" or REG[basereg] in (rt, rt2)) or basereg == "pc":
-                raise Unsupported("ldrd / strd form")
-            b = "c->r[%d]" % REG[basereg]
-            d = mem.mem.disp
-            addr = b if post or not d else ("%s + 0x%Xu" % (b, d & 0xFFFFFFFF) if d > 0 else "%s - 0x%Xu" % (b, -d))
-            line.append("{ uint32_t a = %s;" % addr)
-            if base_m == "ldrd":
-                line.append(" uint32_t v0 = ld32(c, a), v1 = ld32(c, a + 4u); if (c->fault) return;")
-            else:
-                line.append(" st32(c, a, c->r[%d]); st32(c, a + 4u, c->r[%d]); if (c->fault) return;" % (rt, rt2))
-            if post:
-                if ops[3].type != ARM_OP_IMM:
-                    raise Unsupported("ldrd / strd form")
-                k = ops[3].imm if not ops[3].subtracted else -ops[3].imm
-                line.append(" %s = %s %s 0x%Xu;" % (b, b, "+" if k >= 0 else "-", abs(k)))
-            elif i.writeback:
-                line.append(" %s = a;" % b)
-            if base_m == "ldrd":
-                line.append(" c->r[%d] = v0; c->r[%d] = v1;" % (rt, rt2))
-            line.append(" }")
-        elif base_m in ("ldr", "ldrb", "ldrh", "ldrsb", "ldrsh", "str", "strb", "strh"):
-            if base_m.startswith("ldr") and rd() == 13:
-                raise Unsupported("sp set from a register (a stack switch: 00123768 restores a saved context)")
-            mem = ops[1]
-            if mem.type != ARM_OP_MEM:
-                raise Unsupported("operand kind")
-            basereg = i.reg_name(mem.mem.base)
-            post = len(ops) > 2  # ldr rX, [rN], #off / rM: the access at rN, then rN moves
-            if (i.writeback or post) and (basereg == "pc" or REG[basereg] == rd()):
-                raise Unsupported("writeback form")
-            if rd() == 15:
-                if base_m == "ldr" and basereg == "sp" and post and ops[2].type == ARM_OP_IMM and i.cc in (0, 15):
-                    # ldr pc, [sp], #4: pop {pc}, a return
-                    line.append("{ uint32_t v = ld32(c, c->r[13]); if (c->fault) return; c->r[13] += 0x%Xu;"
-                                " if (v != ret) { c->fault = 3; return; } } return;" % (ops[2].imm & 0xFFFFFFFF))
-                    body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, "".join(line))))
-                    returned = True
-                    if max(targets, default=0) <= i.address:
-                        break
-                    returned = False
-                    continue
-                if basereg == "pc" and not post and not i.writeback and base_m == "ldr":
-                    # ldr pc, [pc, #-4]: a veneer jumping to the word after it (an import the module loader writes)
-                    t = pc_of(i.address) + mem.mem.disp
-                    line.append(jump("ld32(c, %s)" % ADDR(t) if t in relocated else "0x%Xu" % word(t)))
-                    line.append(" if (c->fault) return;")
-                    stmt = "".join(line)
-                    body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, (
-                        "if (%s) { %s }" % (COND[i.cc], stmt)) if i.cc not in (0, 15) else stmt)))
+            elif base_m == "bx" and ops[0].type == ARM_OP_REG:  # a jump through a register: the function it lands in returns
+                line.append("{ uint32_t t = c->r[%d]; if (c->r[14] != ret) { c->fault = 3; return; } call_indirect(c, t, ret); "
+                            "return; }" % rd())  # for this one (lr checked as at bx lr)
+                returned = i.cc in (0, 15)
+            elif base_m == "blx" and ops[0].type == ARM_OP_REG:  # an indirect call (virtual methods, function pointers)
+                lr = (i.address + i.size) | thumb
+                line.append("{ uint32_t t = c->r[%d]; c->r[14] = %s; call_indirect(c, t, %s); if (c->fault) return; }"
+                            % (rd(), ADDR(lr), ADDR(lr)))
+            elif base_m in ("bl", "blx") and ops[0].type == ARM_OP_IMM:  # blx #imm: a call that switches instruction set
+                t = ops[0].imm & 0xFFFFFFFF
+                to_thumb = thumb != (base_m == "blx")
+                if to_thumb is False:
+                    t &= ~3  # (a Thumb blx's target is word-aligned)
+                if not is_start(t, to_thumb):
+                    raise Unsupported("call to a target that is no function start")
+                callees.add(t)
+                lr = (i.address + i.size) | thumb
+                line.append("c->r[14] = %s; %s(c, %s); if (c->fault) return;" % (ADDR(lr), fname(t, module), ADDR(lr)))
+            elif base_m == "b":
+                t = ops[0].imm
+                if start <= t < end_code:
+                    targets.add(t)
+                    line.append("goto L%X;" % t)
+                elif is_start(t, thumb) or entries is not None:  # a tail call: the callee returns for this function
+                    # (a target that is no start is inside another function: code the compiler shares between functions,
+                    # one function's tail jumped into from others; it is translated as its own entry, from there to the
+                    # end of the function holding it, by the caller of translate: entries receives it)
+                    if not is_start(t, thumb):
+                        entries.add(t)
+                    callees.add(t)
+                    # (it returns where this one would, to lr: so lr must be that address, as at bx lr)
+                    line.append("if (c->r[14] != ret) { c->fault = 3; return; } %s(c, ret); return;" % fname(t, module))
                     returned = i.cc in (0, 15)
-                    if returned and max(targets, default=0) <= i.address:
-                        break
-                    returned = False
-                    continue
-                raise Unsupported("load to pc")
-            if basereg == "pc":
-                if base_m != "ldr":
-                    raise Unsupported("pc-relative non-word access")
-                t = pc_of(i.address) + mem.mem.disp
-                if t in relocated:  # a word the module loader rewrites (an import): its value only exists when run
-                    line.append("c->r[%d] = ld32(c, %s);" % (rd(), ADDR(t)))
                 else:
-                    line.append("c->r[%d] = 0x%Xu;" % (rd(), word(t)))
-            else:
-                addr = "c->r[%d]" % REG[basereg]
-                if mem.mem.index:
-                    idx = "c->r[%d]" % REG[i.reg_name(mem.mem.index)]
-                    sh, n = mem.shift.type, mem.shift.value
-                    if sh == 2:
-                        idx = "(%s << %d)" % (idx, n)
-                    elif sh == 3 and 0 < n < 32:
-                        idx = "(%s >> %d)" % (idx, n)
-                    elif sh == 1 and 0 < n < 32:
-                        idx = "(uint32_t)((int32_t)%s >> %d)" % (idx, n)
-                    elif sh == 4 and 0 < n < 32:
-                        idx = "((%s >> %d) | (%s << %d))" % (idx, n, idx, 32 - n)
-                    elif sh != 0:
-                        raise Unsupported("shifted index")
-                    addr += (" - " if mem.subtracted else " + ") + idx
-                elif mem.mem.disp:
-                    addr += " + 0x%Xu" % (mem.mem.disp & 0xFFFFFFFF) if mem.mem.disp > 0 else " - 0x%Xu" % -mem.mem.disp
-                newbase = None
-                if post:  # the access at the base; the base moves by the third operand after it
-                    off = ops[2]
-                    if off.type == ARM_OP_IMM:
-                        k = off.imm if not off.subtracted else -off.imm
-                        step = ("+ 0x%Xu" % (k & 0xFFFFFFFF)) if k >= 0 else ("- 0x%Xu" % -k)
-                    elif off.type == ARM_OP_REG and off.shift.type in (0, 2):
-                        step = ("- " if off.subtracted else "+ ") + "c->r[%d]" % REG[i.reg_name(off.reg)]
-                        if off.shift.type == 2 and off.shift.value:
-                            step = step[:2] + "(%s << %d)" % (step[2:], off.shift.value)
+                    raise Unsupported("branch out of the function to no function start")
+            elif base_m in MULTI and not re.match(r"[sd]\d+$", i.reg_name(ops[0].reg)) or base_m in ("push", "pop"):
+                mode, wb, load = MULTI[base_m]
+                if base_m in ("push", "pop"):
+                    b, regs, wb = 13, [REG[i.reg_name(o.reg)] for o in ops], True
+                else:
+                    b, regs, wb = REG[i.reg_name(ops[0].reg)], [REG[i.reg_name(o.reg)] for o in ops[1:]], i.writeback
+                if any(re.match(r"[sd]\d+$", i.reg_name(o.reg)) for o in ops):
+                    raise Unsupported("instruction v%s" % base_m)
+                if b == 15 or wb and b in regs or "^" in i.op_str or not load and 15 in regs or load and 13 in regs:
+                    raise Unsupported("ldm / stm form")
+                n = len(regs)
+                first = {"ia": "", "ib": " + 4u", "da": " - %du" % (4 * n - 4), "db": " - %du" % (4 * n)}[mode]
+                line.append("{ uint32_t a = c->r[%d]%s;" % (b, first))
+                for k, r in enumerate(sorted(regs)):
+                    if load:
+                        line.append(" uint32_t v%d = ld32(c, a + %du);" % (k, 4 * k))
                     else:
-                        raise Unsupported("post-index form")
-                    newbase = "c->r[%d] %s" % (REG[basereg], step)
-                    addr = "c->r[%d]" % REG[basereg]
-                elif i.writeback:  # pre-index with !: the base becomes the address
-                    newbase = "a"
-                load = {"ldr": "ld32(c, a)", "ldrb": "ld8(c, a)", "ldrh": "ld16(c, a)",
-                        "ldrsb": "(uint32_t)(int8_t)ld8(c, a)", "ldrsh": "(uint32_t)(int16_t)ld16(c, a)"}
-                line.append("{ uint32_t a = %s;" % addr)
-                if base_m in load:
-                    line.append(" uint32_t v = %s; if (c->fault) return;" % load[base_m])
-                else:
-                    line.append(" st%s(c, a, c->r[%d]); if (c->fault) return;"
-                                % ({"str": "32", "strb": "8", "strh": "16"}[base_m], rd()))
-                if newbase:
-                    line.append(" c->r[%d] = %s;" % (REG[basereg], newbase))
-                if base_m in load:
-                    line.append(" c->r[%d] = v;" % rd())
+                        line.append(" st32(c, a + %du, c->r[%d]);" % (4 * k, r))
+                line.append(" if (c->fault) return;")
+                if wb:
+                    line.append(" c->r[%d] %s= %du;" % (b, "+" if mode in ("ia", "ib") else "-", 4 * n))
+                if load:
+                    for k, r in enumerate(sorted(regs)):
+                        line.append(" c->r[%d] = v%d;" % (r, k))
                 line.append(" }")
-            line.append(" if (c->fault) return;")
-        else:
-            raise Unsupported("instruction %s" % m)
+                if load and 15 in regs:
+                    # the popped pc must be the return address this function got: a test whose stores overwrote it has no
+                    # meaning (the original would jump elsewhere); fault 3 makes the trial invalid
+                    line.append(" if (c->r[15] != ret) { c->fault = 3; return; } return;")
+                    returned = i.cc in (0, 15)
+            elif thumb and base_m in ("lsl", "lsr", "asr", "ror") and len(ops) == 2 and ops[1].type == ARM_OP_REG:
+                # Thumb's lsls rd, rs: rd shifted by rs
+                kind = {"lsl": 0, "lsr": 1, "asr": 2, "ror": 3}[base_m]
+                line.append("{ uint32_t k, v = shreg(c, %d, c->r[%d], c->r[%d], &k); c->r[%d] = v;"
+                            % (kind, rd(), REG[i.reg_name(ops[1].reg)], rd()))
+                if i.update_flags:
+                    line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
+                line.append(" (void)k; }")
+            elif base_m in ("lsl", "lsr", "asr", "ror", "rrx") and len(ops) == 2:  # capstone's alias of mov rd, rm, <shift>
+                if rd() == 15:
+                    raise Unsupported("write to pc")
+                if base_m == "rrx":  # capstone gives rrx with no shift on its operand: the carry in at the top, bit 0 out
+                    src = "c->r[%d]" % REG[i.reg_name(ops[1].reg)]
+                    e, carry = "((c->c << 31) | (%s >> 1))" % src, "(%s & 1)" % src
+                else:
+                    e, carry = operand2(i, ops[1], i.update_flags)
+                # the carry out read before rd is written (rd may be the shifted register: lsrs r0, r0, #8)
+                line.append("{ uint32_t sk; uint32_t v = %s; uint32_t k = %s; c->r[%d] = v; (void)sk; (void)k;"
+                            % (e, carry if carry else "c->c", rd()))
+                if i.update_flags:
+                    line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
+                line.append(" }")
+            elif base_m in ("lsl", "lsr", "asr", "ror") and len(ops) == 3 and ops[2].type == ARM_OP_REG:
+                if rd() == 15 or REG[i.reg_name(ops[2].reg)] == 15:
+                    raise Unsupported("shift form")
+                kind = {"lsl": 0, "lsr": 1, "asr": 2, "ror": 3}[base_m]
+                line.append("{ uint32_t k, v = shreg(c, %d, c->r[%d], c->r[%d], &k); c->r[%d] = v;"
+                            % (kind, REG[i.reg_name(ops[1].reg)], REG[i.reg_name(ops[2].reg)], rd()))
+                if i.update_flags:
+                    line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
+                line.append(" (void)k; }")
+            elif base_m in ("lsl", "lsr", "asr", "ror") and len(ops) == 3 and ops[2].type == ARM_OP_IMM:
+                n = ops[2].imm
+                r = "c->r[%d]" % REG[i.reg_name(ops[1].reg)]
+                if rd() != 15 and n == 32 and base_m in ("lsr", "asr"):  # lsrs / asrs #32: all out, the carry is bit 31
+                    line.append("{ uint32_t k = %s >> 31, v = %s; c->r[%d] = v;" % (
+                        r, "0u" if base_m == "lsr" else "(uint32_t)((int32_t)%s >> 31)" % r, rd()))
+                    if i.update_flags:
+                        line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
+                    line.append(" (void)k; }")
+                elif rd() == 15 or not 0 < n < 32:
+                    raise Unsupported("shift form")
+                else:
+                    e = {"lsl": "(%s << %d)" % (r, n), "lsr": "(%s >> %d)" % (r, n),
+                         "asr": "(uint32_t)((int32_t)%s >> %d)" % (r, n), "ror": "((%s >> %d) | (%s << (32 - %d)))" % (r, n, r, n)}[base_m]
+                    carry = "((%s >> %d) & 1)" % (r, 32 - n) if base_m == "lsl" else "((%s >> %d) & 1)" % (r, n - 1)
+                    line.append("{ uint32_t k = %s, v = %s; c->r[%d] = v;" % (carry, e, rd()))
+                    if i.update_flags:
+                        line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
+                    line.append(" (void)k; }")
+            elif base_m in ("mov", "mvn") and rd() == 15:
+                if base_m == "mov" and ops[1].type == ARM_OP_REG and i.reg_name(ops[1].reg) == "lr" and not ops[1].shift.type \
+                        and not i.update_flags:  # mov pc, lr: a return (ARMv4's)
+                    line.append("if (c->r[14] != ret) { c->fault = 3; return; } return;")
+                elif i.update_flags:
+                    raise Unsupported("write to pc with flags (an exception return)")
+                else:
+                    e, _ = operand2(i, ops[1], False)
+                    line.append("{ uint32_t sk; (void)sk; %s }" % jump(e if base_m == "mov" else "~(%s)" % e))
+                returned = i.cc in (0, 15)
+            elif base_m in ("mov", "mvn"):
+                # (sp set from a register, as anything else: in the C sp is a register pointing into the emulated memory; a
+                # stack switched for good shows at the return, whose address is checked)
+                e, carry = operand2(i, ops[1], i.update_flags)
+                v = e if base_m == "mov" else "~(%s)" % e
+                line.append("{ uint32_t sk; uint32_t v = %s; uint32_t k = %s; c->r[%d] = v; (void)sk; (void)k;"
+                            % (v, carry if carry else "c->c", rd()))  # (the carry read before rd is written)
+                if i.update_flags:
+                    line.append(" c->n = v >> 31; c->z = v == 0; c->c = k;")
+                line.append(" }")
+            elif base_m == "adr":  # an address, known here
+                if rd() == 15:
+                    raise Unsupported("write to pc")
+                line.append("c->r[%d] = %s;" % (rd(), ADDR(pc_of(i.address) + ops[1].imm)))
+            elif base_m in ("add", "sub", "rsb", "adc", "sbc", "rsc", "cmp", "cmn", "and", "orr", "eor", "bic", "tst", "teq"):
+                compare = base_m in ("cmp", "cmn", "tst", "teq")
+                if not compare and len(ops) == 2:  # Thumb's two-operand form: adds rd, rm / add sp, #k is rd = rd op ...
+                    ops = [ops[0], ops[0], ops[1]]
+                logical = base_m in ("and", "orr", "eor", "bic", "tst", "teq")
+                dst = None if compare else rd()
+                to_pc = dst == 15
+                if to_pc:  # a computed jump (a table of cases: add pc, r5, r6), its target computed as rd would be
+                    if (m[:-2] if i.cc not in (0, 15) else m).endswith("s") or thumb:
+                        raise Unsupported("write to pc with flags (an exception return)" if not thumb else "write to pc")
+                    dst = 16  # (a scratch: c->r[16] does not exist; the value goes to the jump below)
+                a_op, b_op = (ops[0], ops[1]) if compare else (ops[1], ops[2] if len(ops) > 2 else None)
+                if b_op is None:
+                    raise Unsupported("two-operand form")
+                pc_first = i.reg_name(a_op.reg) == "pc"
+                if pc_first and base_m in ("add", "sub") and not compare and not i.update_flags and b_op.type == ARM_OP_IMM \
+                        and not to_pc:  # add / sub rX, pc, #k: an address, known here
+                    v = (pc_of(i.address) + (b_op.imm if base_m == "add" else -b_op.imm)) & 0xFFFFFFFF
+                    body.append((i.address, "    /* %08X %s %s */ %s" % (
+                        i.address, m, i.op_str, ("if (%s) { c->r[%d] = %s; }" % (COND[i.cc], dst, ADDR(v))) if i.cc not in (0, 15)
+                        else "c->r[%d] = %s;" % (dst, ADDR(v)))))
+                    continue
+                # (pc as the first operand otherwise: its value, the instruction's address + 8, or + 4 in Thumb)
+                ra = ADDR(i.address + (4 if thumb else 8)) if pc_first else "c->r[%d]" % REG[i.reg_name(a_op.reg)]
+                # (from the mnemonic: capstone reports update_flags for adc / sbc with no s, as they read the carry)
+                flags = compare or (m[:-2] if i.cc not in (0, 15) else m).endswith("s")
+                e, carry = operand2(i, b_op, flags and logical)
+                x, y = (e, ra) if base_m in ("rsb", "rsc") else (ra, e)
+                line.append("{ uint32_t sk; uint32_t x = %s, y = %s, v; (void)sk;" % (x, y))
+                if base_m in ("add", "cmn"):
+                    line.append(" v = x + y;")
+                    if flags:
+                        line.append(" c->c = v < x; c->v = ((~(x ^ y) & (x ^ v)) >> 31);")
+                elif base_m == "adc":
+                    line.append(" uint64_t w = (uint64_t)x + y + c->c; v = (uint32_t)w;")
+                    if flags:
+                        line.append(" c->c = (uint32_t)(w >> 32); c->v = ((~(x ^ y) & (x ^ v)) >> 31);")
+                elif base_m in ("sbc", "rsc"):  # x - y - not carry
+                    line.append(" uint64_t w = (uint64_t)x + (uint32_t)~y + c->c; v = (uint32_t)w;")
+                    if flags:
+                        line.append(" c->c = (uint32_t)(w >> 32); c->v = (((x ^ y) & (x ^ v)) >> 31);")
+                elif base_m in ("sub", "rsb", "cmp"):
+                    line.append(" v = x - y;")
+                    if flags:
+                        line.append(" c->c = x >= y; c->v = (((x ^ y) & (x ^ v)) >> 31);")
+                else:
+                    op = {"and": "x & y", "tst": "x & y", "orr": "x | y", "eor": "x ^ y", "teq": "x ^ y", "bic": "x & ~y"}[base_m]
+                    line.append(" v = %s;" % op)
+                    if flags and carry:
+                        line.append(" c->c = %s;" % carry)
+                if flags:
+                    line.append(" c->n = v >> 31; c->z = v == 0;")
+                if to_pc:
+                    line.append(" %s" % jump("v"))
+                    returned = i.cc in (0, 15)
+                elif not compare:
+                    line.append(" c->r[%d] = v;" % dst)
+                line.append(" }")
+            elif base_m in ("uxtb", "uxth", "sxtb", "sxth") and len(ops) == 2:
+                src = ops[1]
+                if rd() == 15 or src.shift.type not in (0, 4):
+                    raise Unsupported("extend form")
+                r = "c->r[%d]" % REG[i.reg_name(src.reg)]
+                if src.shift.type == 4 and src.shift.value:  # ror #8 / #16 / #24 first
+                    n = src.shift.value
+                    r = "((%s >> %d) | (%s << %d))" % (r, n, r, 32 - n)
+                cast = {"uxtb": "(uint32_t)(uint8_t)", "uxth": "(uint32_t)(uint16_t)", "sxtb": "(uint32_t)(int8_t)",
+                        "sxth": "(uint32_t)(int16_t)"}[base_m]
+                line.append("c->r[%d] = %s%s;" % (rd(), cast, r))
+            elif base_m == "mul":  # (muls sets N and Z; on ARMv6 C and V are kept)
+                src = [REG[i.reg_name(o.reg)] for o in ops[1:]] if len(ops) == 3 else [rd(), REG[i.reg_name(ops[1].reg)]]
+                line.append("{ uint32_t v = c->r[%d] * c->r[%d]; c->r[%d] = v;" % (src[0], src[1], rd()))
+                if i.update_flags:
+                    line.append(" c->n = v >> 31; c->z = v == 0;")
+                line.append(" }")
+            elif base_m in ("ldrd", "strd"):  # two words: rt at the address, rt2 at + 4
+                rt, rt2, mem = REG[i.reg_name(ops[0].reg)], REG[i.reg_name(ops[1].reg)], ops[2]
+                basereg = i.reg_name(mem.mem.base)
+                post = len(ops) > 3
+                if mem.type != ARM_OP_MEM or 15 in (rt, rt2) or base_m == "ldrd" and 13 in (rt, rt2) or mem.mem.index or \
+                        (i.writeback or post) and (basereg == "pc" or REG[basereg] in (rt, rt2)) or basereg == "pc":
+                    raise Unsupported("ldrd / strd form")
+                b = "c->r[%d]" % REG[basereg]
+                d = mem.mem.disp
+                addr = b if post or not d else ("%s + 0x%Xu" % (b, d & 0xFFFFFFFF) if d > 0 else "%s - 0x%Xu" % (b, -d))
+                line.append("{ uint32_t a = %s;" % addr)
+                if base_m == "ldrd":
+                    line.append(" uint32_t v0 = ld32(c, a), v1 = ld32(c, a + 4u); if (c->fault) return;")
+                else:
+                    line.append(" st32(c, a, c->r[%d]); st32(c, a + 4u, c->r[%d]); if (c->fault) return;" % (rt, rt2))
+                if post:
+                    if ops[3].type != ARM_OP_IMM:
+                        raise Unsupported("ldrd / strd form")
+                    k = ops[3].imm if not ops[3].subtracted else -ops[3].imm
+                    line.append(" %s = %s %s 0x%Xu;" % (b, b, "+" if k >= 0 else "-", abs(k)))
+                elif i.writeback:
+                    line.append(" %s = a;" % b)
+                if base_m == "ldrd":
+                    line.append(" c->r[%d] = v0; c->r[%d] = v1;" % (rt, rt2))
+                line.append(" }")
+            elif base_m in ("ldr", "ldrb", "ldrh", "ldrsb", "ldrsh", "str", "strb", "strh"):
+                mem = ops[1]
+                if mem.type != ARM_OP_MEM:
+                    raise Unsupported("operand kind")
+                basereg = i.reg_name(mem.mem.base)
+                post = len(ops) > 2  # ldr rX, [rN], #off / rM: the access at rN, then rN moves
+                if (i.writeback or post) and (basereg == "pc" or REG[basereg] == rd()):
+                    raise Unsupported("writeback form")
+                if rd() == 15:
+                    if base_m == "ldr" and basereg == "sp" and post and ops[2].type == ARM_OP_IMM and i.cc in (0, 15):
+                        # ldr pc, [sp], #4: pop {pc}, a return
+                        line.append("{ uint32_t v = ld32(c, c->r[13]); if (c->fault) return; c->r[13] += 0x%Xu;"
+                                    " if (v != ret) { c->fault = 3; return; } } return;" % (ops[2].imm & 0xFFFFFFFF))
+                        body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, "".join(line))))
+                        returned = True
+                        if max(targets, default=0) <= i.address:
+                            break
+                        returned = False
+                        continue
+                    if basereg == "pc" and not post and not i.writeback and base_m == "ldr":
+                        # ldr pc, [pc, #-4]: a veneer jumping to the word after it (an import the module loader writes)
+                        t = pc_of(i.address) + mem.mem.disp
+                        line.append(jump("ld32(c, %s)" % ADDR(t) if t in relocated else "0x%Xu" % word(t)))
+                        line.append(" if (c->fault) return;")
+                        stmt = "".join(line)
+                        body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, (
+                            "if (%s) { %s }" % (COND[i.cc], stmt)) if i.cc not in (0, 15) else stmt)))
+                        returned = i.cc in (0, 15)
+                        if returned and max(targets, default=0) <= i.address:
+                            break
+                        returned = False
+                        continue
+                    raise Unsupported("load to pc")
+                if basereg == "pc":
+                    if base_m != "ldr":
+                        raise Unsupported("pc-relative non-word access")
+                    t = pc_of(i.address) + mem.mem.disp
+                    if t in relocated:  # a word the module loader rewrites (an import): its value only exists when run
+                        line.append("c->r[%d] = ld32(c, %s);" % (rd(), ADDR(t)))
+                    else:
+                        line.append("c->r[%d] = 0x%Xu;" % (rd(), word(t)))
+                else:
+                    addr = "c->r[%d]" % REG[basereg]
+                    if mem.mem.index:
+                        idx = "c->r[%d]" % REG[i.reg_name(mem.mem.index)]
+                        sh, n = mem.shift.type, mem.shift.value
+                        if sh == 2:
+                            idx = "(%s << %d)" % (idx, n)
+                        elif sh == 3 and 0 < n < 32:
+                            idx = "(%s >> %d)" % (idx, n)
+                        elif sh == 1 and 0 < n < 32:
+                            idx = "(uint32_t)((int32_t)%s >> %d)" % (idx, n)
+                        elif sh == 4 and 0 < n < 32:
+                            idx = "((%s >> %d) | (%s << %d))" % (idx, n, idx, 32 - n)
+                        elif sh != 0:
+                            raise Unsupported("shifted index")
+                        addr += (" - " if mem.subtracted else " + ") + idx
+                    elif mem.mem.disp:
+                        addr += " + 0x%Xu" % (mem.mem.disp & 0xFFFFFFFF) if mem.mem.disp > 0 else " - 0x%Xu" % -mem.mem.disp
+                    newbase = None
+                    if post:  # the access at the base; the base moves by the third operand after it
+                        off = ops[2]
+                        if off.type == ARM_OP_IMM:
+                            k = off.imm if not off.subtracted else -off.imm
+                            step = ("+ 0x%Xu" % (k & 0xFFFFFFFF)) if k >= 0 else ("- 0x%Xu" % -k)
+                        elif off.type == ARM_OP_REG and off.shift.type in (0, 2):
+                            step = ("- " if off.subtracted else "+ ") + "c->r[%d]" % REG[i.reg_name(off.reg)]
+                            if off.shift.type == 2 and off.shift.value:
+                                step = step[:2] + "(%s << %d)" % (step[2:], off.shift.value)
+                        else:
+                            raise Unsupported("post-index form")
+                        newbase = "c->r[%d] %s" % (REG[basereg], step)
+                        addr = "c->r[%d]" % REG[basereg]
+                    elif i.writeback:  # pre-index with !: the base becomes the address
+                        newbase = "a"
+                    load = {"ldr": "ld32(c, a)", "ldrb": "ld8(c, a)", "ldrh": "ld16(c, a)",
+                            "ldrsb": "(uint32_t)(int8_t)ld8(c, a)", "ldrsh": "(uint32_t)(int16_t)ld16(c, a)"}
+                    line.append("{ uint32_t a = %s;" % addr)
+                    if base_m in load:
+                        line.append(" uint32_t v = %s; if (c->fault) return;" % load[base_m])
+                    else:
+                        line.append(" st%s(c, a, c->r[%d]); if (c->fault) return;"
+                                    % ({"str": "32", "strb": "8", "strh": "16"}[base_m], rd()))
+                    if newbase:
+                        line.append(" c->r[%d] = %s;" % (REG[basereg], newbase))
+                    if base_m in load:
+                        line.append(" c->r[%d] = v;" % rd())
+                    line.append(" }")
+                line.append(" if (c->fault) return;")
+            else:
+                raise Unsupported("instruction %s" % m)
+        except Unsupported as e:
+            # an instruction the translator has no C for: the thread stops there (fault 10, pc its address), the
+            # function still translated; data the walk took for code after a call that does not return is the usual
+            # case (Omega Ruby's 0017E2E8, after bl to abort). Reached, it stops: nothing is guessed.
+            unsupported.append((i.address, str(e)))
+            line = ["c->r[15] = %s; c->fault = 10; return; /* UNSUPPORTED: %s */" % (ADDR(i.address), str(e).replace("*/", "* /"))]
+            returned = i.cc in (0, 15)
         stmt = "".join(line)
         if i.cc not in (0, 15):
             stmt = "if (%s) { %s }" % (COND[i.cc], stmt)
@@ -909,16 +1001,31 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             callees.add(end_code)
             body.append((last.address, "    /* falls into %08X */ if (c->r[14] != ret) { c->fault = 3; return; } "
                                        "%s(c, ret); return;" % (end_code, fname(end_code, module))))
+        elif last is not None and last.cc in (0, 15) and last.mnemonic in ("bl", "blx"):
+            # its last instruction calls a function that does not return (abort, a fatal error): should it return, the
+            # original would run whatever follows; the C stops on fault 8 instead of guessing
+            body.append((last.address, "    /* the call above does not return */ c->fault = 8; return;"))
         else:
-            raise Unsupported("no unconditional return found")
+            # its code ends with no return the walk could see (data after its last instruction, or a conditional one
+            # last): should the thread get there, it stops (fault 10 at that address) rather than run on
+            body.append((last.address if last is not None else start, "    /* no return past here */ c->r[15] = %s;"
+                         " c->fault = 10; return;" % ADDR(end_code)))
+            unsupported.append((end_code, "no return found"))
     # ret: the address this function returns to (its caller's bl + 4, or what a tail call passes on), for the pop {pc}
     # check
     # the function's body, and the function: a wrapper counting how deep the calls go (tail calls and calls through
     # pointers can loop without end on a test's random values: past 2,000 the trial stops on fault 2, as a long loop
     # does, instead of overflowing the C's stack)
     out = ["static void %s_body(Cpu* c, uint32_t ret)\n{\n    (void)ret;" % name]
+    if computed:
+        done = sorted({a for a, _ in body if a < end_code})
+        cases = " ".join("case 0x%Xu: goto L%X;" % (x, x) for x in done)
+        body = [(a, s.replace("@CASES@", cases)) for a, s in body]
+        targets.update(done)
+    labelled = set()
     for a, s in body:
-        if a in targets:
+        if a in targets and a not in labelled:  # (once: a line added after an instruction carries its address too)
+            labelled.add(a)
             out.append("L%X: if (++c->steps > 100000) { c->fault = 2; return; }" % a)
         out.append(s)
     out.append("}")
@@ -944,7 +1051,7 @@ def main():
         thumb = frozenset(int(r[0], 16) for r in rows if r[3] == "thumb")
         arm = frozenset(int(r[0], 16) for r in rows if r[3] != "thumb")
         size = {int(r[0], 16): int(r[4]) for r in rows}
-    end = a.end or a.address + min(size.get(a.address) or 0x400, 0x4000)
+    end = a.end or a.address + min(size.get(a.address) or 0x400, MAX_FUNCTION)
     callees = set()
     try:
         print(translate(code, a.base, a.address, end, "f_%08X" % a.address, arm, callees,

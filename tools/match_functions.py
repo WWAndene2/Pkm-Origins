@@ -14,10 +14,8 @@ repository: it holds the game's literal constants). Needs capstone, unicorn and 
 Unicorn stands in for Azahar here (same ARM instructions, no 3DS system); whole-game checks use Azahar (§4).
 """
 import argparse
-import bisect
 import json
 import mmap
-import multiprocessing
 import ctypes
 import os
 import random
@@ -35,6 +33,7 @@ from unicorn.arm_const import (UC_ARM_REG_CPSR, UC_ARM_REG_LR, UC_ARM_REG_R0, UC
                                UC_ARM_REG_PC, UC_ARM_REG_FPEXC, UC_ARM_REG_FPSCR, UC_ARM_REG_S0, UC_ARM_REG_C13_C0_3)
 
 import arm2c
+import translate_program
 
 REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6,
         UC_ARM_REG_R7, UC_ARM_REG_R8, UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12]
@@ -112,9 +111,6 @@ void undo(void) { while (NL) { NL--; *where(LA[NL]) = LV[NL]; } }
 """
 
 
-TRANSLATE = None  # (code, base, sizes, ARM starts, relocated words), set before the translating processes fork
-
-
 def svc_stand_in(n, r):
     """hos_svc of the trials' C, for Unicorn: r0-r3 from the call's number and r0-r7"""
     h = (n * 0x9E3779B1) & 0xFFFFFFFF
@@ -130,19 +126,6 @@ def svc_stand_in(n, r):
     return out
 
 
-def translate_one(s, end=None, is_thumb=None):
-    """(s, ((C, size), callees)), or (s, the reason it is not translated). end and is_thumb: an entry inside a function
-    (a branch's target there), translated to that function's end in its instruction set"""
-    code, base, size, arm, thumb, relocated = TRANSLATE
-    try:
-        callees = set()
-        c = arm2c.translate(code, base, s, end or s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees,
-                            relocated, s in thumb if is_thumb is None else is_thumb, thumb, set())
-        return s, (c, callees)
-    except arm2c.Unsupported as x:
-        return s, "instruction " + str(x).split()[1] if str(x).startswith("instruction") else str(x)
-
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("code")
@@ -155,6 +138,10 @@ def main():
     p.add_argument("--cro", help="the game's modules (static.crs): the words of the program they rewrite are read when run")
     p.add_argument("--uses", help="test only the functions with one of these instructions (a regular expression on the "
                    "mnemonic: 'ldrex|strex', 'v(add|mul)'), and what they call: a quick check of a new translation")
+    p.add_argument("--module", help="test this CRO module's functions (from --cro, the list being the modules' list "
+                   "symbols/*_cro_functions.tsv) at --module-base, where the game loaded it (--map its memory)")
+    p.add_argument("--module-base", type=lambda v: int(v, 16), default=0)
+    p.add_argument("--map", action="append", default=[], help="FILE@ADDRESS: more of the game's memory under the tests")
     p.add_argument("--only", type=lambda v: int(v, 16), help="test this function only (and what it calls)")
     p.add_argument("--exheader", help="the program's exheader: its text and read-only data are made read-only, as on "
                    "the 3DS (a trial writing there is impossible in the game: X's 00507F50 on a random index wrote its "
@@ -163,47 +150,18 @@ def main():
     a = p.parse_args()
     code = open(a.code, "rb").read()
     rows = [l.split() for l in open(a.functions) if l.strip() and not l.startswith("#")]
+    module, vb = a.module, 0  # vb: where the code is in the game's memory, added to its functions' offsets
+    if module:  # a CRO module: code is its file (offsets from 0), functions from the modules' list, at its load address
+        import cro_functions
+        mod = next(m for m in cro_functions.load(a.cro) if m.name == module)
+        code, a.base, vb = mod.data, 0, a.module_base
+        rows = [[r[1], r[2], "0", r[3], r[4]] for r in rows if r[0] == module]
     starts = sorted(int(r[0], 16) for r in rows)
     thumb = {int(r[0], 16) for r in rows if r[3] == "thumb"}  # (arm2c translates both)
     size = {int(r[0], 16): int(r[4]) for r in rows}
-    arm = frozenset(x for x in starts if x not in thumb)
-    relocated = arm2c.static_relocations(a.cro) if a.cro else frozenset()
-    funcs, reasons, deps = {}, {}, {}
-    global TRANSLATE
-    TRANSLATE = (code, a.base, size, arm, frozenset(thumb), relocated)
-    with multiprocessing.get_context("fork").Pool(a.jobs) as pool_:  # translating is a third of a run: shared too
-        done = pool_.map(translate_one, starts, chunksize=256)
-    why = {}  # each refused function's own reason
-    for s, got in done:
-        if isinstance(got, str):
-            reasons[got] = reasons.get(got, 0) + 1
-            why[s] = got
-        else:
-            (c, n), callees = got
-            funcs[s], deps[s] = (c, n), callees
-    # the entries inside functions their branches reach (shared tails), translated as functions of their own, from
-    # there to the end of the function holding them, until none is new (an entry's code may branch into another)
-    entry_thumb = set()
-    while True:
-        new = {t for d in deps.values() for t in d if t not in funcs and t not in why and t not in size}
-        if not new:
-            break
-        for t in sorted(new):
-            k = bisect.bisect(starts, t) - 1
-            f = starts[k] if k >= 0 else None
-            if f is None or t >= f + (size[f] or 0):
-                why[t] = "branch to no function's code"
-                reasons[why[t]] = reasons.get(why[t], 0) + 1
-                continue
-            _, got = translate_one(t, f + min(size[f], 0x4000), f in thumb)
-            if isinstance(got, str):
-                why[t] = got
-                reasons["(entry) " + got] = reasons.get("(entry) " + got, 0) + 1
-            else:
-                (c, n), callees = got
-                funcs[t], deps[t] = (c, n), callees
-                if f in thumb:
-                    entry_thumb.add(t)
+    relocated = frozenset(mod.relocated) if module else arm2c.static_relocations(a.cro) if a.cro else frozenset()
+    funcs, deps, why, reasons, entry_thumb = translate_program.translate_program(
+        code, a.base, starts, size, thumb, relocated, module, a.jobs)
     thumb |= entry_thumb  # (an entry in a Thumb function is Thumb: its address in the table and Unicorn's start)
     # a function whose callee is not translated is not either, until none is left
     while True:
@@ -248,7 +206,9 @@ def main():
     os.makedirs(tmp, exist_ok=True)
     # the C in one file per job (compiled at once), each with the declarations; the first has the trial machinery and
     # the tables
-    protos = "".join("void f_%08X(Cpu* c, uint32_t ret);\n" % s for s, _, _ in funcs)
+    protos = "".join("void %s(Cpu* c, uint32_t ret);\n" % arm2c.fname(s, module) for s, _, _ in funcs)
+    if module:
+        protos += "extern uint32_t B_%s;\n" % module
     parts = max(1, a.jobs)
     srcs = [os.path.join(tmp, "functions%d.c" % k) for k in range(parts)]
     for k, path in enumerate(srcs):
@@ -259,11 +219,13 @@ def main():
     src = srcs[0]
     with open(src, "a") as f:
         f.write(MAIN)
+        if module:
+            f.write("uint32_t B_%s = 0x%Xu;\n" % (module, vb))
         # call_indirect: a binary search of the translated functions by address (a Thumb one's with bit 0 set, as a
         # pointer to it holds it: an even address to Thumb code, or odd to ARM, finds nothing) (an untranslated target: fault 4,
         # the trial does not count)
-        f.write("static const uint32_t A[] = {%s};\n" % ", ".join("0x%Xu" % (s | (s in thumb)) for s, _, _ in funcs))
-        f.write("typedef void (*Fn)(Cpu*, uint32_t);\nstatic const Fn T[] = {%s};\n" % ", ".join("f_%08X" % s for s, _, _ in funcs))
+        f.write("static const uint32_t A[] = {%s};\n" % ", ".join("0x%Xu" % ((vb + s) | (s in thumb)) for s, _, _ in funcs))
+        f.write("typedef void (*Fn)(Cpu*, uint32_t);\nstatic const Fn T[] = {%s};\n" % ", ".join(arm2c.fname(s, module) for s, _, _ in funcs))
         f.write("void run(int i, Cpu* c) { fesetround(FE_TOWARDZERO); T[i](c, c->r[14]); fesetround(FE_TONEAREST); }\n")
         f.write("void call_indirect(Cpu* c, uint32_t t, uint32_t ret) { int lo = 0, hi = %d;"
                 " while (lo < hi) { int m = (lo + hi) / 2; if (A[m] < t) lo = m + 1; else hi = m; }"
@@ -308,6 +270,9 @@ def main():
         else:
             uc.mem_map(a.base, (len(code) + 0xFFF) & ~0xFFF)
             uc.mem_write(a.base, code)
+        for spec in a.map:  # more of the game's memory: FILE@ADDRESS (the modules' region)
+            path, addr = spec.rsplit("@", 1)
+            regions.append((int(addr, 16), open(path, "rb").read()))
         cbufs = [ctypes.create_string_buffer(d, len(d)) for _, d in regions]
         for addr, d in regions:
             uc.mem_map(addr, (len(d) + 0xFFF) & ~0xFFF)
@@ -321,6 +286,8 @@ def main():
         so.where.restype = ctypes.POINTER(ctypes.c_uint8)
         if a.exheader:  # from the program's start to its data segment (exheader 0x30: the data segment's address)
             so.protect(a.base, struct.unpack_from("<I", open(a.exheader, "rb").read(), 0x30)[0])
+        if module:  # the module's code segment, mapped read-only by ldr:ro
+            so.protect(vb + mod.code_start, vb + mod.code_end)
         heap_pages = [addr + o for addr, d in regions if addr == 0x08000000 for o in range(0, len(d), 0x1000)
                       if any(d[o:o + 0x1000])]
         written = set()  # what Unicorn wrote in the game's memory this trial
@@ -407,7 +374,7 @@ def main():
                 written.clear()
                 c_wrote = {la[k] for k in range(so.logged())}
                 try:
-                    uc.emu_start(s | (s in thumb), RET, count=200000)
+                    uc.emu_start((vb + s) | (s in thumb), RET, count=200000)
                 except UcError as e:
                     bad = "unicorn: %s at pc %08X (cpsr %08X)" % (e, uc.reg_read(UC_ARM_REG_PC), uc.reg_read(UC_ARM_REG_CPSR))
                     so.undo()
@@ -473,8 +440,10 @@ def main():
             text = f.read()
         if not text:
             job = readers.index(r)
-            raise SystemExit("job %d died testing %08X (the translated C crashed: run --only %X --jobs 1)"
-                             % (job, struct.unpack_from("<I", current, 4 * job)[0], struct.unpack_from("<I", current, 4 * job)[0]))
+            at = struct.unpack_from("<I", current, 4 * job)[0]
+            raise SystemExit("job %d died %s" % (job, "testing %08X (the translated C crashed, or its error is above: "
+                                                 "run --only %X --jobs 1)" % (at, at) if at else
+                                                 "before its first function (its error is above)"))
         m, bad, u, tm = json.loads(text)
         matched, untested, thumb_matched = matched + m, untested + u, thumb_matched + tm
         mismatched += [tuple(x) for x in bad]
