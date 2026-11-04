@@ -255,5 +255,18 @@ Performance comes first in every design choice, the more so for the seamless co-
    Tools: match_functions.py --uses REGEX tests only the functions with such an instruction (and their callees: a new
    translation checked in seconds), tools/match_game.sh runs a whole game in one command, arm2c.py --functions prints a
    function's C as the check translates it.
-   Then: svc into `src/hos/` (the system calls the game makes, first as the trials see them); the jumps through pc; pld,
-   the multiplies.
+   svc added (4 November): `svc #n` calls `hos_svc(c, n)`, the kernel's call in `src/hos/`; the trials stand it in on
+   both sides by the same mixing of n and r0-r7 into r0-r3 (checked sensitive: a stand-in off by one on the C side, 445
+   of 523 mismatch). Omega Ruby **15,220 translated, 13,399 matched, 0 mismatched**, 1,821 with no valid trial; X
+   **15,004, 13,196, 0 mismatched**, 1,808.
+   What `src/hos/` must answer, measured: tools/svc_inventory.py (static: 33 svc numbers in Omega Ruby's code and
+   modules, 34 in X, all known to Azahar; 256 IPC headers) and tools/azahar_trace_run.sh + hos_calls.py (every call a
+   headless Azahar run makes, counted at Pomegrade's code-trace hooks, none lost). From boot to the field: Omega Ruby
+   534,116 calls, X 136,942 (X with Pomegrade's `draw every 15`: full drawing ran it at 1 frame a second), 23 kernel
+   calls and 101 service requests between them. Most: WaitSynchronization1, ArbitrateAddress, ClearEvent, SignalEvent,
+   GetSystemTick, SendSyncRequest; gsp::Gpu TriggerCmdReqQueue (86,312 in Omega Ruby), file reads (2,263), FlushDataCache.
+   Services: srv, APT (A in Omega Ruby, U in X), fs:USER and its file sessions, cfg:u, gsp::Gpu, dsp::DSP, hid:USER (its
+   handles only: input comes by shared memory), ldr:ro, frd:u, boss:U, ndm:u, ptm:u; X also y2r:u (its intro video) and
+   nwm::UDS (the Player Search System); Omega Ruby's nwm::UDS comes later (a 14-minute run had it).
+   Then: `src/hos/` from that list, the kernel's objects first (threads, events, mutexes, the address arbiter: most of
+   the calls), then srv, fs, gsp; the jumps through pc; pld, the multiplies.
