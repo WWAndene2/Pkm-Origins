@@ -38,7 +38,7 @@ a decompilation.
 | Tools: binary splitting, symbol lists, matching checks | `tools/` |
 | Symbol names (address, name, status) for each game version | `symbols/` |
 | Tests | `tests/` |
-| Documentation | Root: `CLAUDE.md` only (no README, owner's decision of 4 November); the rest in `docs/`: `RECOMPILATION_PLAN.md` (the plan and its progress), `FEATURE_IDEAS.md` (the owner's checklist of features for after the faithful recompilation, in French, edited by the owner) |
+| Documentation | Root: `CLAUDE.md` only (no README, owner's decision of 4 November); the rest in `docs/`: `RECOMPILATION_PLAN.md` (the plan and its progress), `FEATURE_IDEAS.md` (the owner's checklist of features for after the faithful recompilation, in French, edited by the owner), `BALANCE_STUDY.md` (the balance study behind the "Rééquilibré" option: Smogon usage data and game design, in French) |
 
 Names: C/C++ files in PascalCase after their subject (`FieldCamera.cpp`); a decompiled function keeps the name given in
 `symbols/` (Pomegrade's `function_names.tsv` style: `Subsystem_Action`). No catch-all `misc/` or `utils/` folder.

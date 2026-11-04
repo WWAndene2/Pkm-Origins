@@ -245,6 +245,7 @@ Principe : la version fidèle garde tout tel quel ; chaque correction est une op
   - Correction : IA « avancée » en option : prédit les faiblesses, change de Pokémon, utilise les objets au bon moment.
 
 ### Équilibrage Pokémon (option « Rééquilibré », la version fidèle garde l'original)
+- L'étude détaillée (données Smogon, game design, propositions) : `docs/BALANCE_STUDY.md`.
 - [ ] Méthode avant toute correction (remarque du propriétaire, 4 novembre : un changement de Game Freak n'est pas forcément bon)
   - Fixer le but par mode : campagne solo contre l'IA, ou combats en ligne ; les réglages ne sont pas les mêmes.
   - Mesurer : usage réel en 6e génération (statistiques Smogon de l'époque), calculs de dégâts, simulations contre l'IA du jeu recompilé.
