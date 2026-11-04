@@ -11,3 +11,4 @@ code.bin
 /build/
 /build-*/
 *.state
+__pycache__/
