@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Step 3c: the matching check of docs/RECOMPILATION_PLAN.md §4 for the translator's first slice. Every function of the
-list that tools/arm2c.py translates is compiled natively and run against the original ARM code executed by Unicorn (an
-ARM CPU emulator, the original instructions themselves) on the same random registers and memory; a function matches when
-registers r0-r12, the flags and the whole test memory are equal after every trial.
+"""The matching check of docs/RECOMPILATION_PLAN.md §4 for the translator (steps 3 and 5). Every function of the list that
+tools/arm2c.py translates, and whose callees it translates too, is compiled natively and run against the original ARM
+code executed by Unicorn (an ARM CPU emulator, the original instructions themselves) on the same random registers and
+memory, the stack inside it; a function matches when registers r0-r12 and sp, the flags and the whole test memory are
+equal after every trial. Its calls run in both: the original callee in Unicorn, the translated one in C.
 
-  match_leaf.py <code.bin> <functions.tsv> [--trials 200] [--limit N] [--base 0x100000] [--keep DIR]
+  match_functions.py <code.bin> <functions.tsv> [--trials 200] [--limit N] [--base 0x100000] [--keep DIR]
 
 Trials where the C stops on a fault (an access out of the 64 KiB test memory, or unaligned) are skipped, not counted as
 matches; a function with no valid trial is reported apart. --keep DIR writes the generated C there (outside the
@@ -58,31 +59,58 @@ def main():
     rows = [l.split() for l in open(a.functions) if l.strip() and not l.startswith("#")]
     starts = sorted(int(r[0], 16) for r in rows)
     thumb = {int(r[0], 16) for r in rows if r[3] == "thumb"}  # bounds of their neighbours; arm2c reads ARM only
-    ends = starts[1:] + [a.base + len(code)]
-    funcs, reasons = [], {}
-    for s, e in zip(starts, ends):
+    size = {int(r[0], 16): int(r[4]) for r in rows}
+    arm = frozenset(x for x in starts if x not in thumb)
+    funcs, reasons, deps = {}, {}, {}
+    for s in starts:
         if s in thumb:
             reasons["thumb"] = reasons.get("thumb", 0) + 1
             continue
         try:
-            c, size = arm2c.translate(code, a.base, s, min(e, s + 0x400), "f_%08X" % s)
-            funcs.append((s, c, size))
+            callees = set()
+            c, n = arm2c.translate(code, a.base, s, s + min(size[s] or 0x400, 0x4000), "f_%08X" % s, arm, callees)
+            funcs[s], deps[s] = (c, n), callees
         except arm2c.Unsupported as x:
             k = str(x).split(" ")[0] if str(x).startswith("instruction") else str(x)
             k = "instruction " + str(x).split()[1] if str(x).startswith("instruction") else k
             reasons[k] = reasons.get(k, 0) + 1
-        if a.limit and len(funcs) >= a.limit:
+    # a function whose callee is not translated is not either, until none is left
+    while True:
+        drop = [s for s in funcs if not deps[s] <= funcs.keys()]
+        if not drop:
             break
+        for s in drop:
+            del funcs[s]
+            reasons["calls an untranslated function"] = reasons.get("calls an untranslated function", 0) + 1
+    if a.limit:  # the first N, and every function they call (directly or not)
+        keep, todo = set(), sorted(funcs)[:a.limit]
+        while todo:
+            k = todo.pop()
+            if k not in keep:
+                keep.add(k)
+                todo.extend(deps[k])
+        funcs = {k: v for k, v in funcs.items() if k in keep}
+    with_calls = sum(1 for s in funcs if deps[s])
+    funcs = [(s, c, n) for s, (c, n) in sorted(funcs.items())]
     tmp = a.keep or tempfile.mkdtemp()
     os.makedirs(tmp, exist_ok=True)
-    src = os.path.join(tmp, "leaf.c")
+    src = os.path.join(tmp, "functions.c")
     with open(src, "w") as f:
         f.write(PRELUDE)
+        f.write(arm2c.RUNTIME)
+        for s, _, _ in funcs:
+            f.write("void f_%08X(Cpu* c, uint32_t ret);\n" % s)
         for s, c, _ in funcs:
             f.write(c + "\n")
-        f.write("typedef void (*Fn)(Cpu*);\nstatic const Fn T[] = {%s};\n" % ", ".join("f_%08X" % s for s, _, _ in funcs))
-        f.write("void run(int i, Cpu* c, uint8_t* m, uint32_t b, uint32_t n) { M = m; MBASE = b; MSIZE = n; T[i](c); }\n")
-    lib = os.path.join(tmp, "leaf.so")
+        # call_indirect: a binary search of the translated functions by address (an untranslated target: fault 4,
+        # the trial does not count)
+        f.write("static const uint32_t A[] = {%s};\n" % ", ".join("0x%Xu" % s for s, _, _ in funcs))
+        f.write("typedef void (*Fn)(Cpu*, uint32_t);\nstatic const Fn T[] = {%s};\n" % ", ".join("f_%08X" % s for s, _, _ in funcs))
+        f.write("void run(int i, Cpu* c, uint8_t* m, uint32_t b, uint32_t n) { M = m; MBASE = b; MSIZE = n; T[i](c, c->r[14]); }\n")
+        f.write("void call_indirect(Cpu* c, uint32_t t, uint32_t ret) { int lo = 0, hi = %d;"
+                " while (lo < hi) { int m = (lo + hi) / 2; if (A[m] < t) lo = m + 1; else hi = m; }"
+                " if (lo < %d && A[lo] == t) T[lo](c, ret); else c->fault = 4; }\n" % (len(funcs), len(funcs)))
+    lib = os.path.join(tmp, "functions.so")
     subprocess.run(["cc", "-O1", "-shared", "-fPIC", "-w", "-o", lib, src], check=True)
     so = ctypes.CDLL(lib)
 
@@ -112,6 +140,7 @@ def main():
             cpu = Cpu()
             for k in range(13):
                 cpu.r[k] = regs[k]
+            cpu.r[13], cpu.r[14] = MB + MS - 0x100, RET  # the same stack and return address as Unicorn's
             cpu.n, cpu.z, cpu.c, cpu.v = (flags >> 3) & 1, (flags >> 2) & 1, (flags >> 1) & 1, flags & 1
             cmem = ctypes.create_string_buffer(mem, MS)
             so.run(idx, ctypes.byref(cpu), cmem, MB, MS)
@@ -134,12 +163,12 @@ def main():
                 # read ~20,000 elements, 4 November); C's own cap counts blocks and went further: no result to compare
                 valid -= 1
                 continue
-            ur = [uc.reg_read(r) for r in REGS]
+            ur = [uc.reg_read(r) for r in REGS] + [uc.reg_read(UC_ARM_REG_SP)]
             cp = uc.reg_read(UC_ARM_REG_CPSR) >> 28
-            cr = [cpu.r[k] for k in range(13)]
+            cr = [cpu.r[k] for k in range(14)]
             cf = (cpu.n << 3) | (cpu.z << 2) | (cpu.c << 1) | cpu.v
             if ur != cr:
-                bad = "registers: %s" % [(k, hex(ur[k]), hex(cr[k])) for k in range(13) if ur[k] != cr[k]][:3]
+                bad = "registers: %s" % [(k, hex(ur[k]), hex(cr[k])) for k in range(14) if ur[k] != cr[k]][:3]
             elif cp != cf:
                 bad = "flags: arm %X, c %X" % (cp, cf)
             elif bytes(uc.mem_read(MB, MS)) != cmem.raw:
@@ -152,8 +181,8 @@ def main():
             untested += 1
         else:
             matched += 1
-    print("%d functions in the list; %d translated (leaf subset); %d matched, %d mismatched, %d with no valid trial"
-          % (len(starts), len(funcs), matched, len(mismatched), untested))
+    print("%d functions in the list; %d translated (%d of them call others); %d matched, %d mismatched, %d with no valid "
+          "trial" % (len(starts), len(funcs), with_calls, matched, len(mismatched), untested))
     for s, why in mismatched[:20]:
         print("  MISMATCH %08X %s" % (s, why))
     print("not translated, by first reason:")
