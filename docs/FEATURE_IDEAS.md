@@ -245,12 +245,17 @@ Principe : la version fidèle garde tout tel quel ; chaque correction est une op
   - Correction : IA « avancée » en option : prédit les faiblesses, change de Pokémon, utilise les objets au bon moment.
 
 ### Équilibrage Pokémon (option « Rééquilibré », la version fidèle garde l'original)
+- [ ] Méthode avant toute correction (remarque du propriétaire, 4 novembre : un changement de Game Freak n'est pas forcément bon)
+  - Fixer le but par mode : campagne solo contre l'IA, ou combats en ligne ; les réglages ne sont pas les mêmes.
+  - Mesurer : usage réel en 6e génération (statistiques Smogon de l'époque), calculs de dégâts, simulations contre l'IA du jeu recompilé.
+  - Changer une variable à la fois, la raison écrite à côté ; chaque correction en option, comparable à l'original.
+  - Les corrections de Game Freak des générations suivantes servent de pistes, jamais de justification.
 - [ ] Méga-Kangourex et Amour Filial trop forts
-  - Correction : le second coup à 25 % de puissance au lieu de 50 %, comme Game Freak l'a fait à la 7e génération.
+  - Piste : réduire le second coup (Game Freak l'a passé à 25 % à la 7e génération : une référence, pas une preuve).
 - [ ] Flambusard et Ailes Bourrasque trop forts
-  - Correction : priorité seulement à PV pleins, comme à la 7e génération.
+  - Piste : condition sur la priorité (Game Freak : PV pleins à la 7e génération, critiqué comme trop sévère ; à mesurer).
 - [ ] Exagide et Déclic Tactique dominant
-  - Correction : stats réduites comme à la 8e génération.
+  - Piste : à mesurer d'abord ; Game Freak a réduit ses stats à la 8e génération, pour un autre jeu et un autre format.
 - [ ] Pokémon trop faibles à revaloriser (Couafarel, Polagriffe, Flabébé et sa lignée...)
   - Correction : liste à établir à partir des stats totales et de l'usage en compétition ; nouvelles attaques ou talents plutôt que stats changées.
 - [ ] Méga-Évolutions inégales (certaines inutilisables)
