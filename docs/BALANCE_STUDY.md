@@ -110,7 +110,7 @@ mémoire) est remplacée ; ce qu'elle avait de faux est listé au §7.3.
 | Zarbi | 53 ; Puissance Cachée seule | Une seule attaque par conception | Idée originale : la lettre fixe le type de Puissance Cachée (non mesurée) |
 | Spinda | 658 ; **Contestation** (95 %) ; Surpuissance, Coup Bas, Vampi-Poing | Rôle réel grâce à Contestation + Surpuissance ; **Surpuissance non apprenable** en campagne | Surpuissance par tuteur ; garder Contestation (et non Pieds Confus) |
 | Corayon | 412 ; Régé-Force ; Ébullition, Soin, Toxik, Piège de Roc | Rôle de poseur de pièges réel ; Tour Rapide non appris | Tour Rapide |
-| Delcatty | 666 ; Normalise ; Bluff, Coup Bas, Abri, Vœu | **Vœu et Coup Bas non apprenables** en campagne (transfert seulement) | Vœu et Coup Bas par tuteur |
+| Delcatty | 666 ; Normalise ; Bluff, Coup Bas, Abri, Vœu | Vœu et Coup Bas **s'apprennent** par œuf sur Skitty (X / Y et ORAS) : rôle déjà accessible ; le frein est le total (380) | Aucune attaque ; stats ou talent à étudier |
 | Séracrawl | 2 822 ; Fermeté ; Avalanche, Tour Rapide, Soin, Séisme | Rôle réel ; Distorsion non appris ; sa Déf. Spé. (46) est le frein | Distorsion possible ; pas prioritaire |
 | Canarticho | 243 ; **Acharné** (71 %) ; Lame Feuille, Rapace, Danse Lames | Attaques déjà là ; le frein est le total (352) et l'objet Bâton | Pas de nouveau talent (Sniper retiré) ; le vrai levier est hors attaques (stats ou évolution d'Épée / Bouclier, à étudier) |
 | Mélokrik | 395 ; Technicien ; Toile Gluante, Aéropique | Rôle réel (Toile Gluante déjà apprise) | Aucune |
@@ -118,9 +118,9 @@ mémoire) est remplacée ; ce qu'elle avait de faux est listé au §7.3.
 
 **Conclusion vérifiée** : pour la plupart de ces Pokémon, le rôle existe déjà et les joueurs le trouvent ; le frein est
 surtout leurs **stats**. Le seul manque clair en campagne est une série d'**attaques jouées en compétition mais
-impossibles à apprendre sur une seule cartouche** (Surpuissance pour Spinda, Vœu et Coup Bas pour Delcatty, Anti-Brume pour
-Cadoizo) : les rendre disponibles par tuteur ne change pas l'équilibre compétitif (elles y étaient déjà) et aide la
-campagne. Proposition à étendre : lister **toutes** les attaques jouées sur Smogon mais non apprenables dans X / Y / ORAS.
+impossibles à apprendre sur une seule cartouche** (Surpuissance pour Spinda, Anti-Brume pour Cadoizo ; Delcatty retiré : ses attaques
+s'apprennent par œuf sur Skitty, vérifié en tenant compte de toute la lignée) : les rendre disponibles par tuteur ne change pas l'équilibre compétitif (elles y étaient déjà) et aide la
+campagne. La liste complète est au §8.
 
 ### 7.3 Erreurs de la première version (corrigées ci-dessus)
 
@@ -134,5 +134,97 @@ campagne. Proposition à étendre : lister **toutes** les attaques jouées sur S
   Canarticho (Acharné utilisé à 71 %), Corps Maudit pour Banshitrouye (rôle déjà rempli).
 - Mimi-Queue proposée pour Spinda : attaque faible, sans intérêt pour le rôle.
 
-Sources : https://www.smogon.com/stats/2016-09/ (ubers-0.txt, ou-0.txt, uu-0.txt, ru-0.txt, nu-0.txt, vgc2016-0.txt) ;
+## 8. Attaques jouées en compétition mais impossibles à apprendre sur une cartouche X / Y / ORAS
+
+Mesure du 4 novembre : pour chaque stade final, les attaques jouées dans au moins 10 % des équipes Smogon (septembre
+2016, Ubers à NU, Pokémon joués dans au moins 500 équipes) que **ni lui ni aucun stade précédent** n'apprend dans X / Y
+ou ORAS (niveau, œuf, CT, tuteur ; PokeAPI, recoupé avec les jeux pour le niveau et l'œuf). Elles venaient de jeux plus
+anciens par transfert. Les rendre apprenables (tuteur) aide la campagne sans changer l'équilibre compétitif de l'époque,
+où elles étaient déjà jouées. Résultat : 82 Pokémon, 139 attaques. Limite : Spinda (658 équipes en NU) y figure pour
+Surpuissance, Cadoizo (346 équipes) est sous le seuil mais Anti-Brume reste non apprenable (vérifié à part).
+
+- Airmure : Anti-Brume (40 % OU)
+- Apireine : Anti-Brume (13 % NU)
+- Arceus : Revenant (67 % UBERS), Anti-Brume (55 % UBERS), Balle Graine (14 % UBERS), Avalanche (14 % UBERS), Pouvoir Antique (12 % UBERS)
+- Artikodin : Anti-Brume (30 % UU), Avalanche (18 % UBERS), Glas de Soin (11 % NU), Buée Noire (10 % UU)
+- Avaltout : Destruction (13 % NU)
+- Bekipan : Anti-Brume (86 % NU)
+- Branette : Cotogarde (16 % NU)
+- Cadoizo : Avalanche (21 % UBERS)
+- Celebi : Machination (33 % UU)
+- Cheniselle : Piège de Roc (80 % OU), Séisme (44 % OU), Luminocanon (34 % OU), Gyroballe (19 % OU), Boule Roc (16 % OU), Coup Bas (15 % OU)
+- Colhomard : Avalanche (11 % UBERS)
+- Coudlangue : Vœu (65 % NU), Glas de Soin (27 % NU)
+- Dardargnan : Relais (28 % UBERS)
+- Deoxys : Vitesse Extrême (67 % UBERS), Surpuissance (48 % UBERS), Picots (42 % UBERS)
+- Dodrio : Relais (18 % UU)
+- Déflaisan : Picore (10 % NU)
+- Démanta : Anti-Brume (64 % NU), Siphon (12 % UU)
+- Ectoplasma : Cradovague (39 % OU)
+- Empiflor : Coup Bas (10 % NU)
+- Entei : Vitesse Extrême (94 % UU), Boutefeu (48 % UU)
+- Galeking : Avalanche (14 % OU)
+- Genesect : Vitesse Extrême (32 % UBERS), Pied Brûleur (18 % UBERS)
+- Giratina : Anti-Brume (46 % UBERS)
+- Givrali : Avalanche (11 % UBERS)
+- Grodoudou : Frappe Atlas (15 % UU)
+- Grodrive : Tranch’Air (19 % UU)
+- Grolem : Coup Bas (43 % NU)
+- Hoopa : Furie Dimension (47 % UBERS)
+- Hypnomade : Vœu (46 % NU), Frappe Atlas (35 % NU), Relais (15 % UBERS)
+- Jirachi : Crève-Cœur (16 % OU), Plaquage (13 % UBERS)
+- Joliflor : Vampigraine (27 % OU)
+- Kaimorse : Avalanche (15 % UBERS)
+- Kangourex : Plaquage (19 % UBERS)
+- Kapoera : Coup Bas (28 % UU)
+- Kyurem : Éclair Croix (81 % OU), Flamme Croix (67 % UBERS), Éclair Gelé (17 % UBERS)
+- Latias : Anti-Brume (73 % OU)
+- Latios : Anti-Brume (60 % OU)
+- Leuphorie : Vœu (42 % UU)
+- Libégon : Anti-Brume (57 % RU)
+- Luminéon : Anti-Brume (72 % NU)
+- Maskadra : Sécrétion (16 % UBERS), Anti-Brume (16 % RU)
+- Mew : Anti-Brume (33 % OU), E-Coque (31 % OU)
+- Monaflèmit : Coup Bas (20 % UU), Damoclès (20 % RU)
+- Motisma : Hydrocanon (97 % OU), Tempête Verte (96 % RU), Lame d’Air (96 % NU), Surchauffe (94 % UU), Blizzard (91 % UBERS)
+- Moufflair : Coup Bas (66 % NU), Anti-Brume (61 % RU)
+- Munja : Danse Lames (59 % NU), Relais (33 % OU), Coup Bas (26 % NU)
+- Mélodelfe : E-Coque (59 % OU)
+- Ninjask : Anti-Brume (14 % OU)
+- Noctunoir : Coup Bas (19 % UU)
+- Oniglali : Damoclès (33 % RU), Plaquage (13 % UBERS)
+- Papilusion : Cauchemar (15 % UU)
+- Parasect : Balle Graine (23 % UBERS)
+- Phyllali : Balle Graine (14 % UBERS)
+- Pingoléon : Anti-Brume (64 % UU)
+- Ptéra : Damoclès (28 % UU), Anti-Brume (12 % RU)
+- Queulorior : Relais (64 % UBERS), Spore (60 % OU), Toile Gluante (59 % RU), Piège de Roc (52 % RU), Trou Noir (19 % NU), Exuviation (16 % UBERS), Picots (14 % NU), Pics Toxik (13 % NU), Cognobidon (13 % UU), Géo-Contrôle (12 % UBERS), Frotte-Frimousse (11 % NU)
+- Rafflesia : Vampigraine (11 % OU)
+- Raichu : Surf (25 % RU)
+- Raikou : Aurasphère (15 % UBERS), Vitesse Extrême (11 % UBERS)
+- Rapasdepic : Damoclès (28 % UBERS)
+- Rayquaza : Coup Victoire (24 % UBERS)
+- Regice : Avalanche (13 % UBERS)
+- Regigigas : Pouvoir Antique (14 % UBERS), Avalanche (11 % RU)
+- Registeel : Frappe Atlas (64 % RU)
+- Scarabrute : Plaquage (10 % UBERS)
+- Shaymin : Lame d’Air (90 % UBERS), Tempête Verte (22 % UBERS)
+- Smogogo : Cradovague (13 % UU)
+- Solaroc : Aurore (54 % NU), Relais (25 % UBERS)
+- Spinda : Surpuissance (67 % UU)
+- Sulfura : Anti-Brume (14 % UU)
+- Séléroc : Pouvoir Antique (42 % OU), Relais (21 % OU), Rayon Lune (15 % OU)
+- Séviper : Coup Bas (28 % OU)
+- Tarinorme : Pouvoir Antique (14 % OU)
+- Tartard : Onde Vide (29 % NU)
+- Tauros : Escalade (64 % NU), Plaquage (16 % UBERS), Damoclès (14 % UBERS)
+- Tengalice : Coup Bas (74 % NU)
+- Togekiss : Anti-Brume (21 % OU)
+- Victini : Coup Victoire (82 % OU), Charge Foudre (70 % OU), Flamme Bleue (41 % UBERS), Ère Glaciaire (14 % OU), Éclair Croix (11 % UBERS)
+- Vortente : Don Naturel (14 % OU)
+- Wailord : Avalanche (12 % UBERS)
+- Zoroark : Bombe Beurk (26 % UU)
+- Électhor : Anti-Brume (46 % OU)
+
+Sources : https://www.smogon.com/stats/2016-09/ (moveset/ubers-0.txt à moveset/nu-0.txt, ubers-0.txt, ou-0.txt, uu-0.txt, ru-0.txt, nu-0.txt, vgc2016-0.txt) ;
 PokeAPI (https://github.com/PokeAPI/pokeapi, data/v2/csv) ; stats de base lues dans les jeux.
