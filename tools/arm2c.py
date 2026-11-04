@@ -907,20 +907,34 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                             break
                         returned = False
                         continue
-                    if basereg == "pc" and not post and not i.writeback and base_m == "ldr":
+                    if base_m == "ldr" and not post and not i.writeback and (basereg != "pc" or mem.mem.index):
+                        # ldr pc, [rN, ...] / [pc, rM, lsl #2] (a table of cases whose words the module loader writes,
+                        # so not a constant table): the target read from memory where the CPU reads it, then jumped to
+                        sh, n = mem.shift.type, mem.shift.value
+                        if sh not in (0, 2) or mem.subtracted:
+                            raise Unsupported("load to pc")
+                        b = ADDR(pc_of(i.address)) if basereg == "pc" else "c->r[%d]" % REG[basereg]
+                        if mem.mem.index:
+                            off = "(c->r[%d] << %d)" % (REG[i.reg_name(mem.mem.index)], n) if sh == 2 else \
+                                "c->r[%d]" % REG[i.reg_name(mem.mem.index)]
+                        else:
+                            off = "0x%Xu" % (mem.mem.disp & 0xFFFFFFFF)
+                        line.append("{ uint32_t tv = ld32(c, %s + %s); if (c->fault) return; %s }" % (b, off, jump("tv")))
+                    elif basereg == "pc" and not post and not i.writeback and base_m == "ldr":
                         # ldr pc, [pc, #-4]: a veneer jumping to the word after it (an import the module loader writes)
                         t = pc_of(i.address) + mem.mem.disp
                         line.append(jump("ld32(c, %s)" % ADDR(t) if t in relocated else "0x%Xu" % word(t)))
-                        line.append(" if (c->fault) return;")
-                        stmt = "".join(line)
-                        body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, (
-                            "if (%s) { %s }" % (COND[i.cc], stmt)) if i.cc not in (0, 15) else stmt)))
-                        returned = i.cc in (0, 15)
-                        if returned and max(targets, default=0) <= i.address:
-                            break
-                        returned = False
-                        continue
-                    raise Unsupported("load to pc")
+                    else:
+                        raise Unsupported("load to pc")
+                    line.append(" if (c->fault) return;")
+                    stmt = "".join(line)
+                    body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, (
+                        "if (%s) { %s }" % (COND[i.cc], stmt)) if i.cc not in (0, 15) else stmt)))
+                    returned = i.cc in (0, 15)
+                    if returned and max(targets, default=0) <= i.address:
+                        break
+                    returned = False
+                    continue
                 if basereg == "pc":
                     if base_m != "ldr":
                         raise Unsupported("pc-relative non-word access")

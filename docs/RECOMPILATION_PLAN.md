@@ -276,5 +276,16 @@ Performance comes first in every design choice, the more so for the seamless co-
    matched, 0 mismatched**, 6,816 (100 trials each). **It compiles** (tools/build_game.py, outside the repository: the C
    holds the game's constants): Omega Ruby's 45 MB library, X's 43 MB, no stub; the only symbols they need are the
    runtime's (hos_memory, hos_svc) and the C library's.
-   Then: the CRO modules (their code at the address the game maps them, B_<module> + offset in the C; checked on a dump
-   of the mapped region), and `src/hos/` from the list above, the kernel's objects first.
+   **The modules translated (4 November)**: their C writes the module's addresses as B_<module> + offset (the base the
+   game maps it at, through ldr:ro LoadCRO). All 41,998 functions of Omega Ruby's 145 modules translate (42,189 with
+   entries). Checked on a dump with the modules loaded on the field (tools/azahar_trace_preload.c records where each is
+   mapped; a loaded module's header reads FIXD, and the loader changed only words its relocation tables list, 452 of
+   452 in DllTitle's code), with the .code compiled beside them (--with-code): DllSequence 1,058 matched, DllTitle 411,
+   DllBackGround 138, DllFieldDemo 113, **0 mismatched**; every module mapped as its file (--modules all): 9,217 matched,
+   0 mismatched, 32,972 with no valid trial (unlinked, their pointers lead nowhere: the modules need linking, ldr:ro's
+   work, to be tested whole). The modules' tests found a fault in the translator, fixed: ldr pc, [pc, rN, lsl #2] whose
+   table the loader writes was taken for an import veneer (its index ignored).
+   Then: the CRO linker (ldr:ro, in C), checked against the modules Azahar loaded, then every module tested linked;
+   `src/hos/` from the list above (begun: Memory.c, Kernel.c, Thread.c, Sync.c: the handles, the scheduler, the waits,
+   events, mutexes, semaphores, timers and the address arbiter as Azahar has them; tools/svc_abi.py gives each system
+   call's registers from Azahar's declarations).

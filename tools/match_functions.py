@@ -39,6 +39,7 @@ REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R
         UC_ARM_REG_R7, UC_ARM_REG_R8, UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12]
 # the FPSCR every 3DS thread runs with (Azahar's kernel/thread.cpp): default NaN, flush to zero, round toward zero
 FPSCR = 0x03C00010
+RAW_MODULES = 0x40000000  # --modules all: the modules' files from here
 # the thread's local storage (mrc p15, 0, rX, c13, c0, 3): in the test memory, its words random as the rest; and an
 # ARM clrex on the return page, run before each trial
 TLS, CLREX = 0x1F008000, 0x1E000800
@@ -62,11 +63,14 @@ typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps;
    old byte) so that a trial can be compared on what it wrote and undone after */
 extern uint8_t* RP[8]; extern uint32_t RB[8], RS[8]; extern int NR;
 extern uint32_t* LA; extern uint8_t* LV; extern int NL, LMAX;
-extern uint32_t RO_LO, RO_HI; /* the program's text and read-only data: read-only on the 3DS, a write faults (7) */
+extern uint32_t RO_LO[16], RO_HI[16]; extern int NRO; /* read-only on the 3DS (the program's text and read-only data, the modules'
+   code): a write faults (7) */
 static uint8_t* at(Cpu* c, uint32_t a, uint32_t n, int w)
 {
     if (a % n) { c->fault = 1; return 0; }
-    if (w && a + n > RO_LO && a < RO_HI) { c->fault = 7; return 0; }
+    if (w)
+        for (int k = 0; k < NRO; k++)
+            if (a + n > RO_LO[k] && a < RO_HI[k]) { c->fault = 7; return 0; }
     for (int i = 0; i < NR; i++)
         if (a - RB[i] <= RS[i] - n) { /* unsigned: an address near 0xFFFFFFFF cannot wrap past the check */
             uint8_t* p = RP[i] + (a - RB[i]);
@@ -91,8 +95,8 @@ static void st8(Cpu* c, uint32_t a, uint32_t v) { uint8_t* p = at(c, a, 1, 1); i
 MAIN = r"""
 uint8_t* RP[8]; uint32_t RB[8], RS[8]; int NR;
 uint32_t* LA; uint8_t* LV; int NL, LMAX;
-uint32_t RO_LO, RO_HI;
-void protect(uint32_t lo, uint32_t hi) { RO_LO = lo; RO_HI = hi; }
+uint32_t RO_LO[16], RO_HI[16]; int NRO;
+void protect(uint32_t lo, uint32_t hi) { if (NRO < 16) { RO_LO[NRO] = lo; RO_HI[NRO] = hi; NRO++; } }
 void setup(int nr, uint8_t** p, uint32_t* b, uint32_t* s, uint32_t* la, uint8_t* lv, int lmax)
 { NR = nr; for (int i = 0; i < nr; i++) { RP[i] = p[i]; RB[i] = b[i]; RS[i] = s[i]; } LA = la; LV = lv; LMAX = lmax; }
 void scratch(uint8_t* p) { RP[0] = p; NL = 0; }
@@ -109,6 +113,18 @@ void hos_svc(Cpu* c, uint32_t n)
 }
 void undo(void) { while (NL) { NL--; *where(LA[NL]) = LV[NL]; } }
 """
+
+
+def compile_all(command, srcs, jobs):
+    """compiles each source to <source>.o, at most jobs at once; whether all compiled"""
+    running, ok = [], True
+    for path in srcs:
+        if len(running) >= jobs:
+            ok = running.pop(0).wait() == 0 and ok
+        running.append(subprocess.Popen(command + ["-o", path + ".o", path]))
+    for p_ in running:
+        ok = p_.wait() == 0 and ok
+    return ok
 
 
 def svc_stand_in(n, r):
@@ -141,6 +157,11 @@ def main():
     p.add_argument("--module", help="test this CRO module's functions (from --cro, the list being the modules' list "
                    "symbols/*_cro_functions.tsv) at --module-base, where the game loaded it (--map its memory)")
     p.add_argument("--module-base", type=lambda v: int(v, 16), default=0)
+    p.add_argument("--modules", choices=["all"], help="test every module of --cro, each mapped as its file from "
+                   "0x40000000 (where the 3DS maps nothing): its relocated words read as the file has them, the same on "
+                   "both sides")
+    p.add_argument("--with-code", help="with --module: the .code's function list; the .code (the code argument) is "
+                   "translated and compiled beside the module, so the module's calls into it run")
     p.add_argument("--map", action="append", default=[], help="FILE@ADDRESS: more of the game's memory under the tests")
     p.add_argument("--only", type=lambda v: int(v, 16), help="test this function only (and what it calls)")
     p.add_argument("--exheader", help="the program's exheader: its text and read-only data are made read-only, as on "
@@ -150,19 +171,45 @@ def main():
     a = p.parse_args()
     code = open(a.code, "rb").read()
     rows = [l.split() for l in open(a.functions) if l.strip() and not l.startswith("#")]
-    module, vb = a.module, 0  # vb: where the code is in the game's memory, added to its functions' offsets
-    if module:  # a CRO module: code is its file (offsets from 0), functions from the modules' list, at its load address
+    # what is translated and tested: the .code, or CRO modules (--module, --modules all), each a unit (its name, where
+    # it is in the game's memory, its bytes, its function rows, its relocated words); every function is keyed by its
+    # address in the game's memory (a module's offset + where it is), named by arm2c.fname
+    units, raw = [], []  # raw: (address, bytes) of modules mapped as their files (--modules all)
+    if a.module or a.modules:
         import cro_functions
-        mod = next(m for m in cro_functions.load(a.cro) if m.name == module)
-        code, a.base, vb = mod.data, 0, a.module_base
-        rows = [[r[1], r[2], "0", r[3], r[4]] for r in rows if r[0] == module]
-    starts = sorted(int(r[0], 16) for r in rows)
-    thumb = {int(r[0], 16) for r in rows if r[3] == "thumb"}  # (arm2c translates both)
-    size = {int(r[0], 16): int(r[4]) for r in rows}
-    relocated = frozenset(mod.relocated) if module else arm2c.static_relocations(a.cro) if a.cro else frozenset()
-    funcs, deps, why, reasons, entry_thumb = translate_program.translate_program(
-        code, a.base, starts, size, thumb, relocated, module, a.jobs)
-    thumb |= entry_thumb  # (an entry in a Thumb function is Thumb: its address in the table and Unicorn's start)
+        mods = {m.name: m for m in cro_functions.load(a.cro)}
+        names = sorted(mods) if a.modules == "all" else [a.module]
+        at = RAW_MODULES
+        for name in names:
+            m = mods[name]
+            mrows = [[r[1], r[2], "0", r[3], r[4]] for r in rows if r[0] == name]
+            if a.module:
+                vb_ = a.module_base
+            else:  # (each file as it is, one after the other: what the matching compares does not depend on where)
+                vb_, at = at, (at + len(m.data) + 0xFFF) & ~0xFFF
+                raw.append((vb_, m.data))
+            units.append((name, vb_, m.data, mrows, frozenset(m.relocated), m))
+    else:
+        units.append((None, 0, code, rows, arm2c.static_relocations(a.cro) if a.cro else frozenset(), None))
+    funcs, deps, why, reasons, thumb, name_of, starts = {}, {}, {}, {}, set(), {}, []
+    for module, vb, data, urows, relocated, _ in units:
+        ustarts = sorted(int(r[0], 16) for r in urows)
+        uthumb = {int(r[0], 16) for r in urows if r[3] == "thumb"}  # (arm2c translates both)
+        usize = {int(r[0], 16): int(r[4]) for r in urows}
+        uf, ud, uw, ur, ue = translate_program.translate_program(
+            data, 0 if module else a.base, ustarts, usize, uthumb, relocated, module, a.jobs)
+        for k, v in uf.items():
+            funcs[vb + k], name_of[vb + k] = v, arm2c.fname(k, module)
+        for k, v in ud.items():
+            deps[vb + k] = {vb + t for t in v}
+        for k, v in uw.items():
+            why[vb + k] = v
+            name_of.setdefault(vb + k, arm2c.fname(k, module))
+        for k, v in ur.items():
+            reasons[k] = reasons.get(k, 0) + v
+        thumb |= {vb + t for t in uthumb | ue}
+        starts += [vb + x for x in ustarts]
+    entry_thumb = {x for x in thumb if x not in set(starts)}
     # a function whose callee is not translated is not either, until none is left
     while True:
         drop = [s for s in funcs if not deps[s] <= funcs.keys()]
@@ -202,38 +249,59 @@ def main():
         funcs = {k: v for k, v in funcs.items() if k in keep}
     with_calls = sum(1 for s in funcs if deps[s])
     funcs = [(s, c, n) for s, (c, n) in sorted(funcs.items())]
+    # --with-code: the .code translated too, compiled beside the module and found by call_indirect (the module's calls
+    # into the program run in both), not tested itself
+    extra = []  # (address with the Thumb bit, C name, C)
+    if units[0][0] and a.with_code:
+        crow = [l.split() for l in open(a.with_code) if l.strip() and not l.startswith("#")]
+        cstarts = sorted(int(r[0], 16) for r in crow)
+        cthumb = {int(r[0], 16) for r in crow if r[3] == "thumb"}
+        csize = {int(r[0], 16): int(r[4]) for r in crow}
+        cf, cdeps, _, _, cent = translate_program.translate_program(
+            open(a.code, "rb").read(), 0x100000, cstarts, csize, cthumb, arm2c.static_relocations(a.cro), None, a.jobs)
+        while True:  # (only those whose callees are all translated: the C must link)
+            drop = [x for x in cf if not cdeps[x] <= cf.keys()]
+            if not drop:
+                break
+            for x in drop:
+                del cf[x]
+        extra = [(x | (x in cthumb or x in cent), arm2c.fname(x), cf[x][0]) for x in sorted(cf)]
     tmp = a.keep or tempfile.mkdtemp()
     os.makedirs(tmp, exist_ok=True)
     # the C in one file per job (compiled at once), each with the declarations; the first has the trial machinery and
     # the tables
-    protos = "".join("void %s(Cpu* c, uint32_t ret);\n" % arm2c.fname(s, module) for s, _, _ in funcs)
-    if module:
-        protos += "extern uint32_t B_%s;\n" % module
-    parts = max(1, a.jobs)
+    protos = "".join("void %s(Cpu* c, uint32_t ret);\n" % name_of[s] for s, _, _ in funcs)
+    protos += "".join("void %s(Cpu* c, uint32_t ret);\n" % name for _, name, _ in extra)
+    protos += "".join("extern uint32_t B_%s;\n" % u[0] for u in units if u[0])
+    parts = max(1, a.jobs, (len(funcs) + len(extra)) // 1500)  # (files of ~1,500 functions: cc's memory)
     srcs = [os.path.join(tmp, "functions%d.c" % k) for k in range(parts)]
     for k, path in enumerate(srcs):
         with open(path, "w") as f:
             f.write(PRELUDE + arm2c.RUNTIME + protos)
             for s, c, _ in funcs[k::parts]:
                 f.write(c + "\n")
+            for _, _, c in extra[k::parts]:
+                f.write(c + "\n")
     src = srcs[0]
     with open(src, "a") as f:
         f.write(MAIN)
-        if module:
-            f.write("uint32_t B_%s = 0x%Xu;\n" % (module, vb))
+        for u in units:
+            if u[0]:
+                f.write("uint32_t B_%s = 0x%Xu;\n" % (u[0], u[1]))
         # call_indirect: a binary search of the translated functions by address (a Thumb one's with bit 0 set, as a
         # pointer to it holds it: an even address to Thumb code, or odd to ARM, finds nothing) (an untranslated target: fault 4,
         # the trial does not count)
-        f.write("static const uint32_t A[] = {%s};\n" % ", ".join("0x%Xu" % ((vb + s) | (s in thumb)) for s, _, _ in funcs))
-        f.write("typedef void (*Fn)(Cpu*, uint32_t);\nstatic const Fn T[] = {%s};\n" % ", ".join(arm2c.fname(s, module) for s, _, _ in funcs))
-        f.write("void run(int i, Cpu* c) { fesetround(FE_TOWARDZERO); T[i](c, c->r[14]); fesetround(FE_TONEAREST); }\n")
+        table = sorted([(s | (s in thumb), name_of[s]) for s, _, _ in funcs] + [e[:2] for e in extra])
+        f.write("static const uint32_t A[] = {%s};\n" % ", ".join("0x%Xu" % k for k, _ in table))
+        f.write("typedef void (*Fn)(Cpu*, uint32_t);\nstatic const Fn T[] = {%s};\n" % ", ".join(n for _, n in table))
+        f.write("static const Fn R[] = {%s};\n" % ", ".join(name_of[s] for s, _, _ in funcs))  # (the tested)
+        f.write("void run(int i, Cpu* c) { fesetround(FE_TOWARDZERO); R[i](c, c->r[14]); fesetround(FE_TONEAREST); }\n")
         f.write("void call_indirect(Cpu* c, uint32_t t, uint32_t ret) { int lo = 0, hi = %d;"
                 " while (lo < hi) { int m = (lo + hi) / 2; if (A[m] < t) lo = m + 1; else hi = m; }"
-                " if (lo < %d && A[lo] == t) T[lo](c, ret); else c->fault = 4; }\n" % (len(funcs), len(funcs)))
+                " if (lo < %d && A[lo] == t) T[lo](c, ret); else c->fault = 4; }\n" % (len(table), len(table)))
     lib = os.path.join(tmp, "functions.so")
     flags = ["-O1", "-fPIC", "-w", "-frounding-math", "-ffp-contract=off"]
-    compiling = [subprocess.Popen(["cc", "-c"] + flags + ["-o", path + ".o", path]) for path in srcs]
-    if any(p_.wait() for p_ in compiling):
+    if not compile_all(["cc", "-c"] + flags, srcs, a.jobs):
         raise SystemExit("the generated C does not compile")
     subprocess.run(["cc", "-shared", "-o", lib] + [path + ".o" for path in srcs] + ["-lm"], check=True)
     so = ctypes.CDLL(lib)
@@ -273,6 +341,11 @@ def main():
         for spec in a.map:  # more of the game's memory: FILE@ADDRESS (the modules' region)
             path, addr = spec.rsplit("@", 1)
             regions.append((int(addr, 16), open(path, "rb").read()))
+        if raw:  # --modules all: the modules' files, one region
+            blob = bytearray(raw[-1][0] + len(raw[-1][1]) - raw[0][0])
+            for at_, d in raw:
+                blob[at_ - raw[0][0]:at_ - raw[0][0] + len(d)] = d
+            regions.append((raw[0][0], bytes(blob)))
         cbufs = [ctypes.create_string_buffer(d, len(d)) for _, d in regions]
         for addr, d in regions:
             uc.mem_map(addr, (len(d) + 0xFFF) & ~0xFFF)
@@ -286,8 +359,9 @@ def main():
         so.where.restype = ctypes.POINTER(ctypes.c_uint8)
         if a.exheader:  # from the program's start to its data segment (exheader 0x30: the data segment's address)
             so.protect(a.base, struct.unpack_from("<I", open(a.exheader, "rb").read(), 0x30)[0])
-        if module:  # the module's code segment, mapped read-only by ldr:ro
-            so.protect(vb + mod.code_start, vb + mod.code_end)
+        for u in units:  # each module's code segment, mapped read-only by ldr:ro
+            if u[0]:
+                so.protect(u[1] + u[5].code_start, u[1] + u[5].code_end)
         heap_pages = [addr + o for addr, d in regions if addr == 0x08000000 for o in range(0, len(d), 0x1000)
                       if any(d[o:o + 0x1000])]
         written = set()  # what Unicorn wrote in the game's memory this trial
@@ -374,7 +448,7 @@ def main():
                 written.clear()
                 c_wrote = {la[k] for k in range(so.logged())}
                 try:
-                    uc.emu_start((vb + s) | (s in thumb), RET, count=200000)
+                    uc.emu_start(s | (s in thumb), RET, count=200000)
                 except UcError as e:
                     bad = "unicorn: %s at pc %08X (cpsr %08X)" % (e, uc.reg_read(UC_ARM_REG_PC), uc.reg_read(UC_ARM_REG_CPSR))
                     so.undo()

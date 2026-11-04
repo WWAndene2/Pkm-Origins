@@ -25,6 +25,9 @@ int hos_memory_map(uint32_t address, uint32_t size);
 /* makes [address, address + size) unusable again */
 void hos_memory_unmap(uint32_t address, uint32_t size);
 
+/* the memory the game has committed (its program, heap and linear heap allocations), for the resource limits */
+uint32_t hos_memory_committed(void);
+
 /* the host pointer of a game address */
 static inline void* hos_pointer(uint32_t address)
 {

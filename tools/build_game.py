@@ -61,7 +61,7 @@ def main():
         f.write(arm2c.RUNTIME)
         f.writelines("void %s(Cpu* c, uint32_t ret);\n" % arm2c.fname(s) for s in every)
     order = sorted(funcs)
-    parts = max(1, a.jobs)
+    parts = max(1, a.jobs, len(order) // 1500)  # (files of ~1,500 functions: cc's memory, a phone's too)
     srcs = []
     for k in range(parts):
         path = os.path.join(a.out, "part%d.c" % k)
@@ -86,8 +86,14 @@ def main():
                 % (len(keys), len(keys)))
     srcs.append(path)
     flags = [a.opt, "-w", "-frounding-math", "-ffp-contract=off", "-fno-strict-aliasing", "-I", HOS, "-I", a.out]
-    jobs = [subprocess.Popen([a.cc, "-c"] + flags + ["-o", s + ".o", s]) for s in srcs]
-    failed = [s for s, j in zip(srcs, jobs) if j.wait()]
+    failed, running = [], []
+    for src in srcs:  # (at most --jobs at once)
+        if len(running) >= a.jobs:
+            path_, job = running.pop(0)
+            if job.wait():
+                failed.append(path_)
+        running.append((src, subprocess.Popen([a.cc, "-c"] + flags + ["-o", src + ".o", src])))
+    failed += [path_ for path_, job in running if job.wait()]
     lib = os.path.join(a.out, "libgame_code.a")
     report = ["%d functions in the list (%d Thumb); %d translated (%d of them entries), %d stubs"
               % (len(starts), len(thumb - entry_thumb), len(funcs), len(set(funcs) - set(starts)), len(stubs))]
