@@ -211,7 +211,6 @@ pockettactics.com/pokemon-go/quality-of-life-improvements
 - [ ] Peu de nouveaux Pokémon à Kalos (72), Pokédex régional dominé par d'anciennes espèces
 - [ ] Histoire de la Team Flare et des rivaux de X / Y peu développée
 - [ ] ORAS : pas de Zone de combat d'Émeraude (seulement la Maison de Combat)
-- [ ] ORAS : Pokédex des recherches (DexNav) et fonctions d'Émeraude manquantes (Zone de combat, combats revanches variés)
 - [ ] Personnalisation du personnage réduite dans ORAS par rapport à X / Y
 - [ ] Animations de combat lentes, pas d'accélération
 - [ ] Échanges et combats en ligne fermés (Nintendo Network arrêté)
@@ -225,8 +224,8 @@ pockettactics.com/pokemon-go/quality-of-life-improvements
 - [ ] IA des dresseurs qui choisit mal ses attaques et ne change pas de Pokémon
 
 ### Équilibrage Pokémon (à corriger seulement en option : la version fidèle garde l'original)
-- [ ] Méga-Kangourex et Parental Bond trop fort (affaibli par Game Freak à la 7e génération)
-- [ ] Talon Flame et Ailes Bourrasque trop fort (affaibli à la 7e génération)
+- [ ] Méga-Kangourex et Amour Filial trop forts (affaibli par Game Freak à la 7e génération)
+- [ ] Flambusard et Ailes Bourrasque trop forts (affaibli à la 7e génération)
 - [ ] Exagide et Déclic Tactique dominant (Exagide affaibli à la 8e génération)
 - [ ] Pokémon trop faibles à revaloriser : Couafarel, Polagriffe, Flabébé et sa lignée, Pikachu non optimisé, etc. (liste à faire)
 - [ ] Méga-Évolutions déséquilibrées entre elles (certaines inutilisables)
