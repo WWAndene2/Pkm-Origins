@@ -125,8 +125,9 @@ renderer ours, with none of an emulator's costs (decoding the console's GPU comm
   as few passes as possible (subpasses rather than full-screen passes that read the image back), no readback of a frame
   in progress, and never the CPU waiting on the GPU in a frame (Eden's main fault there: `Scheduler::Finish` in hot
   paths, that study §2.4).
-- **Shaders.** The PICA200's shaders translated to SPIR-V once, when the game is compiled on the phone, and the
-  pipelines built then and cached (with the driver's pipeline cache): no compile stutter in play.
+- **Shaders.** Ours, written for the game's materials (step 4 reimplements its graphics library: no PICA200 shader is
+  translated); every pipeline the game's materials need built before play and kept in the driver's pipeline cache: no
+  compile stutter in play.
 - **Textures.** ASTC is native on Mali: a replacement pack (§7) in ASTC is read as is; the game's own formats are
   converted once.
 - **Headroom (estimated, not measured).** The 3DS draws 400 x 240 (top) and 320 x 240 (bottom), with few polygons by
@@ -144,6 +145,66 @@ default (CLAUDE.md §2), chosen for what a tiler does cheaply:
   a slower phone turns off what costs most.
 What the 13T sustains in each setting (heat, frame time over 30 minutes, as Pomegrade's study measured Eden) is to be
 measured, not assumed.
+
+### 8.1 GPU study: what each family needs (4 November; read, not measured)
+
+Marks: **read** (the source named), **seen** (Pomegrade's Eden study, measured on the 13T), **inferred**, **unknown**.
+Sources: Khronos Vulkan-Samples' performance samples, written by Arm, their numbers mostly on Mali-G72 / G76
+(github.com/KhronosGroup/Vulkan-Samples, samples/performance/*/README.adoc); Arm's mobile FAQ and memory limits
+(github.com/ARM-software/vulkan_best_practice_for_mobile_developers, docs/faq.md, docs/memory_limits.md); Mesa's
+Adreno driver documentation (docs.mesa3d.org/drivers/freedreno.html and freedreno/hw/lrz.html); Android's frame pacing
+page (developer.android.com/topic/performance/frame-pacing). Arm's own Mali guide (developer.arm.com 101897) and
+Qualcomm's Adreno guide could not be read (pages drawn by script, or gone): not used.
+
+**Every tiler (Mali, Adreno in binned mode, PowerVR):** read, Vulkan-Samples.
+- Load / store: CLEAR or DONT_CARE, never LOAD unless the previous image is needed; DONT_CARE for what is not kept
+  (depth). Measured there: about 600 MiB/s of reads and 555 MiB/s of writes saved at 2220 x 1080. Clears in loadOp, not
+  vkCmdClear* inside the pass.
+- Depth and MSAA images TRANSIENT with LAZILY_ALLOCATED memory: they live in the tile only. MSAA 4x resolved at the
+  pass's end (pResolveAttachments): about 3 % more bandwidth on Mali-G76, against about 5 GB/s and 500 mW for a separate
+  resolve. So MSAA 4x is the anti-aliasing for phones; more than 4x only after measuring.
+- Effects that read the frame back: subpasses in one render pass when the reads are per pixel (Mali: about 55 % fewer
+  tiles written, G76; merge limits 128 bits a pixel of colour, 8 attachments, same depth and samples).
+- Barriers as narrow as possible (COLOR_ATTACHMENT_OUTPUT to FRAGMENT_SHADER between passes; never ALL_COMMANDS):
+  Mali runs the vertex work of one pass beside the fragment work of the one before (13 % frame time, measured there).
+- Swapchain pre-rotated (preTransform = currentTransform, our matrix turned): without it, memory stalls doubled on a
+  Mali-G72 phone. FIFO with three images (two dropped a G72 to 30 fps there); never vkDeviceWaitIdle in a frame (fences:
+  72 to 56 ms).
+- 16-bit vertex outputs and fragment inputs where exact enough (VK_KHR_16bit_storage), positions relative to the camera;
+  fp16 arithmetic only where measured (the sample itself says a gain is hard to guarantee).
+- Pipelines all made ahead, VkPipelineCache saved between runs (G76: 50 to 24 ms a re-creation); specialization
+  constants rather than branches on uniforms (Mali G76: 4.4 %).
+- Descriptor sets cached and reused, one pool per frame reset whole, one large buffer per frame with dynamic offsets
+  (38 % CPU frame time on a 2019 phone); command pools reset whole.
+
+**Mali (Arm):** read, unless marked.
+- Bandwidth is the limit (shared with the CPU): the rules above first. AFBC (Mali's own framebuffer compression, 33 %
+  less bandwidth measured) stays on only if images avoid STORAGE usage, MUTABLE_FORMAT and ALIAS flags, and copies that
+  undo it; driver r16p0+, Mali-G51+ (the 13T: r54p1, G610).
+- Constant data: static descriptor sets preferred on Mali, push constants about 128 bytes at most; no dynamic indexing
+  by gl_InstanceIndex (it turns off Mali's pre-run of shader constants).
+- Geometry: a fixed 180 MB region holds all vertex output a frame; past it, device lost. Index ranges matter (memory is
+  set aside for every index between a draw's min and max). The 3DS's scenes are far below (inferred).
+- No geometry streams on Mali (seen: Eden fault on the G610); no geometry or tessellation shaders in our renderer.
+- What the 5th generation (G720 and later: vertex shading deferred) changes: unknown, no source read.
+
+**Adreno (Qualcomm):** read, Mesa.
+- Draws either by tiles in on-chip GMEM (128 KB to 1 MB) or straight to memory (sysmem); the driver picks per render
+  pass (Mesa estimates the bandwidth of each; small passes go to memory). Qualcomm's own driver's rule: unknown.
+- LRZ (its early depth reject, like a free depth prepass): lost for a draw that needs late depth, for a draw whose
+  shader discards (in binning), and, before Adreno 650, for the rest of the pass once the depth comparison changes
+  direction. So: one depth direction per pass, few discarding materials, opaque before transparent (inferred).
+
+**PowerVR, Xclipse (Samsung, AMD design), desktop GPUs:** nothing read yet; the general rules hold (inferred). Desktop
+GPUs draw to memory directly: the tile rules cost them nothing, so one renderer serves both (inferred).
+
+**Frame pacing on Android:** read. Swappy (Android's frame pacing library) presents each frame at its time
+(VK_GOOGLE_display_timing) and holds the CPU back with fences so frames do not queue (the source of irregular frames);
+starting setup: fixed interval at the display's rate, no auto modes. Game and render threads apart; the device's
+thermal status watched.
+
+**To measure on the 13T once something draws:** each rule's gain (Arm's malioc for shaders, Perfetto and the GPU
+counters for bandwidth), heat over 30 minutes, and every pipeline built before play (none compiled in a frame).
 
 ## 9. True seamless, no lag (owner's request, 4 November: the main goal after faithfulness; a design, nothing measured)
 
