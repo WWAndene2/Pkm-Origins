@@ -1,6 +1,8 @@
 /* fs:USER and its file sessions, as Azahar answers (service/fs/fs_user.cpp, file.cpp, file_sys/): archives opened by
  * id and path, files in them read through sessions. Done so far: the game's own RomFS (archive 0x3, SelfNCCH, file
- * path type 0: the RomFS's level-3 data from the player's .3ds). Any other archive or path prints what the game asked
+ * path type 0: the RomFS's level-3 data from the player's .3ds), and the system's data archives (archive 0x2345678A,
+ * NCCH, a title's RomFS by title id: the extracted folder's <title id>.romfs, the whole IVFC image, as Azahar serves
+ * its open-source replacements; tools/make_system_archive.py). Any other archive or path prints what the game asked
  * and stops the thread: what it needs is added from that, never guessed. */
 #include "../Ipc.h"
 
@@ -12,13 +14,39 @@
 #include "../Memory.h"
 
 enum { MODULE_FS = 17, SUMMARY_NOT_FOUND = 4, SUMMARY_WRONG_ARGUMENT = 8, LEVEL_STATUS = 25, LEVEL_PERMANENT = 27 };
-enum { ARCHIVE_SELF_NCCH = 0x3 };
+enum { ARCHIVE_SELF_NCCH = 0x3, ARCHIVE_NCCH = 0x2345678A };
 
 typedef struct {
-    int kind; /* 1: the RomFS */
+    int kind; /* 1: the RomFS; 2: data in memory (a system archive's image) */
     uint64_t size;
     uint32_t priority;
+    uint8_t* data;
 } FsFile;
+
+extern const char* hos_game_dir;
+
+/* a system archive's RomFS image (archive 0x2345678A), by its title id: the extracted folder's <title id>.romfs */
+static uint8_t* system_archive(uint64_t title, uint64_t* size)
+{
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%016llX.romfs", hos_game_dir, (unsigned long long)title);
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "hos: no %s (tools/make_system_archive.py makes it)\n", path);
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t* d = malloc(n > 0 ? (size_t)n : 1);
+    if (d && fread(d, 1, (size_t)n, f) != (size_t)n) {
+        free(d);
+        d = NULL;
+    }
+    fclose(f);
+    *size = (uint64_t)n;
+    return d;
+}
 
 extern const HosService hos_fs_file;
 static uint32_t priority;
@@ -53,7 +81,7 @@ static uint32_t open_session(FsFile f)
 static int open_in(HosRequest* q, uint32_t archive, uint32_t type, uint32_t size, uint32_t address, uint32_t* handle)
 {
     if (archive == ARCHIVE_SELF_NCCH && type == 2 && size == 12 && ld32(&q->thread->cpu, address) == 0) {
-        FsFile f = {1, hos_romfs_size(), 0};
+        FsFile f = {1, hos_romfs_size(), 0, NULL};
         *handle = open_session(f);
         return 1;
     }
@@ -66,11 +94,25 @@ static void open_file_directly(HosRequest* q)
     uint32_t archive = hos_in(q, 2), atype = hos_in(q, 3), ftype = hos_in(q, 5), fsize = hos_in(q, 6);
     uint32_t asize, fbytes;
     uint32_t aaddr = hos_in_static(q, 9, &asize), faddr = hos_in_static(q, 11, &fbytes);
+    uint32_t h;
+    if (archive == ARCHIVE_NCCH && atype == 2 && asize == 16 && ftype == 2 && fsize == 20 &&
+        ld32(&q->thread->cpu, faddr + 8) == 0) { /* (a title's RomFS: the file path's type 0) */
+        uint64_t title = (uint64_t)ld32(&q->thread->cpu, aaddr + 4) << 32 | ld32(&q->thread->cpu, aaddr);
+        FsFile f = {2, 0, 0, NULL};
+        if (!(f.data = system_archive(title, &f.size))) {
+            stop(q, "open archive (directly)", archive, atype, asize, aaddr);
+            return;
+        }
+        h = open_session(f);
+        hos_reply(q, 1, 2);
+        hos_out(q, 1, HOS_OK);
+        hos_out_handles(q, 2, 1, &h, 1);
+        return;
+    }
     if (archive != ARCHIVE_SELF_NCCH || atype != 1) {
         stop(q, "open archive (directly)", archive, atype, asize, aaddr);
         return;
     }
-    uint32_t h;
     if (!open_in(q, archive, ftype, fsize, faddr, &h))
         return;
     hos_reply(q, 1, 2);
@@ -175,7 +217,13 @@ static void file_read(HosRequest* q)
     FsFile* f = file_of(q);
     uint64_t offset = (uint64_t)hos_in(q, 2) << 32 | hos_in(q, 1);
     uint32_t length = hos_in(q, 3), desc = hos_in(q, 4), address = hos_in(q, 5);
-    size_t n = f->kind == 1 ? hos_romfs_read(offset, hos_pointer(address), length) : 0;
+    size_t n = 0;
+    if (f->kind == 1) {
+        n = hos_romfs_read(offset, hos_pointer(address), length);
+    } else if (f->kind == 2 && offset < f->size) {
+        n = f->size - offset < length ? (size_t)(f->size - offset) : length;
+        memcpy(hos_pointer(address), f->data + offset, n);
+    }
     hos_reply(q, 2, 2);
     hos_out(q, 1, HOS_OK);
     hos_out(q, 2, (uint32_t)n);
