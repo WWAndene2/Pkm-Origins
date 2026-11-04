@@ -87,6 +87,11 @@ mémoire) est remplacée ; ce qu'elle avait de faux est listé au §7.3.
 
 ### 7.1 Données utilisées
 
+**Périmètre** (remarque du propriétaire, 4 novembre) : les propositions ne sont pas limitées à la 6e génération. Attaques,
+talents, objets et mécanismes des jeux plus récents (7e à 9e génération, Légendes Arceus et Z-A) peuvent être portés dans
+la version recompilée, à condition de reprendre leur comportement d'origine (CLAUDE.md §2 : porté, pas réinventé). Une
+proposition tirée d'un jeu plus récent indique d'où elle vient.
+
 - **Ce que chaque Pokémon apprend dans X / Y et ORAS** (niveau, œuf, CT, tuteur) : tables de PokeAPI (`pokemon_moves`,
   groupes de versions 15 X-Y et 16 ROSA). **Vérifiées contre tes jeux** : attaques par niveau (ORAS a/1/9/1, X a/2/1/4) et
   attaques d'œuf (a/1/9/0, a/2/1/3) identiques pour les 721 espèces des deux jeux, 0 écart. CT et tuteurs pris chez
@@ -126,7 +131,8 @@ campagne. La liste complète est au §8.
 
 - Noms faux : « Cage-Éclair » (Cage Éclair), « Plaie-Croix » (Plaie Croix), « Lame d'Air » (Lame d’Air), « Chant » (Berceuse),
   « Danse-Folle » (Danse Folle), « Coup d'Jus » (n'existe pas).
-- Feuillage proposé pour Parasect : attaque de la 7e génération, absente de X / Y / ORAS.
+- Feuillage proposé pour Parasect : attaque de la 7e génération. **Ce n'était pas une erreur** (remarque du propriétaire, 4
+  novembre) : une attaque d'un jeu plus récent peut être portée ; elle n'apportait simplement rien au rôle (Spore déjà là).
 - Attaques « proposées » déjà apprises : Façade, Demi-Tour (Couafarel), Encornebois, Synthèse, Gonflette, Feu Follet,
   Vampigraine, Ombre Portée, Cadeau, Blizzard, Reflet, Attraction, Ébullition, Toxik, Soin, Gyroballe, Tranche-Nuit, Danse
   Lames, Toile Gluante, Taillade, Spore.
@@ -140,7 +146,7 @@ Mesure du 4 novembre : pour chaque stade final, les attaques jouées dans au moi
 2016, Ubers à NU, Pokémon joués dans au moins 500 équipes) que **ni lui ni aucun stade précédent** n'apprend dans X / Y
 ou ORAS (niveau, œuf, CT, tuteur ; PokeAPI, recoupé avec les jeux pour le niveau et l'œuf). Elles venaient de jeux plus
 anciens par transfert. Les rendre apprenables (tuteur) aide la campagne sans changer l'équilibre compétitif de l'époque,
-où elles étaient déjà jouées. Résultat : 82 Pokémon, 139 attaques. Limite : Spinda (658 équipes en NU) y figure pour
+où elles étaient déjà jouées. Les attaques des générations suivantes s'ajoutent à cette liste comme pistes (§7.1). Résultat : 82 Pokémon, 139 attaques. Limite : Spinda (658 équipes en NU) y figure pour
 Surpuissance, Cadoizo (346 équipes) est sous le seuil mais Anti-Brume reste non apprenable (vérifié à part).
 
 - Airmure : Anti-Brume (40 % OU)
