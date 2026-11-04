@@ -1,0 +1,13 @@
+# Never committed: the owner's game files and anything extracted from them
+*.3ds
+*.cia
+*.cxi
+*.cci
+*.app
+*.sav
+code.bin
+/dumps/
+/extracted/
+/build/
+/build-*/
+*.state
