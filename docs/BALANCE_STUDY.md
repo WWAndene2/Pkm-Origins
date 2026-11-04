@@ -82,6 +82,13 @@ pas de rôle.
 
 ## 7. Talents et attaques : propositions par Pokémon (option « Rééquilibré », campagne d'abord)
 
+**Statut : propositions de l'agent, non mesurées** (question du propriétaire, 4 novembre : « sur quelle base ? »). Seuls les
+talents actuels viennent des données ; les rôles, talents et attaques proposés sont des idées de design écrites de
+mémoire, sans lecture des listes d'attaques ni test. Pour les fonder : (1) lire les listes d'attaques dans les jeux ;
+(2) partir des attaques, talents et objets réellement joués (fichiers « moveset » de Smogon, même mois) et comparer avec
+les Pokémon du même rôle qui marchent ; (3) calculer dégâts et survie avant / après ; (4) simuler contre l'IA du jeu
+recompilé. Aucune ligne ci-dessous n'est une décision.
+
 Principe (remarque du propriétaire, 4 novembre) : revaloriser par les **talents** et les **attaques** avant les stats.
 Les talents actuels sont lus dans les jeux (`tools/personal_stats.py`, noms de PokeAPI) ; les attaques proposées sont des
 attaques de la 6e génération, écrites de mémoire : **les listes d'attaques actuelles n'ont pas encore été lues** (archive
