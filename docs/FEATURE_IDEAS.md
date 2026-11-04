@@ -111,6 +111,24 @@ supprime librement.
 - [ ] Pokémon Paradoxe et événements Tera 7 étoiles (Écarlate / Violet)
 - [ ] Mémoire des lieux : revenir aux villes d'un saut, carte 3D du monde (Écarlate / Violet)
 
+## Repris de Noir / Blanc et Noir 2 / Blanc 2 (de mémoire de l'agent ; à vérifier)
+- [ ] Combats triples et rotatifs partout (X / Y les a ; ORAS à vérifier)
+- [ ] Saisons qui changent chaque mois : décors, routes accessibles, Pokémon (Cerfrousse)
+- [ ] Pokémon World Tournament (PWT) : tournois contre tous les Champions et Maîtres des régions, ici Kalos et Hoenn
+- [ ] Métro de Combat : lignes de combats en simple, double, multi, avec trains et records
+- [ ] Studios Pokéwood : tourner des films avec choix de dialogues
+- [ ] Avenue Fréquentation (Join Avenue) : une rue de boutiques qu'on développe avec les visiteurs
+- [ ] Clés de défi : mode Difficile / Facile débloqué dans l'aventure
+- [ ] Médailles : des centaines d'objectifs (succès en jeu)
+- [ ] Cachettes / Trouées cachées : Pokémon à talent caché qui réapparaissent
+- [ ] Ville Noire / Forêt Blanche : une zone propre à chaque version
+- [ ] Liaison Mémoire : revivre des scènes de la partie précédente
+- [ ] Liaison / Entralink et missions Festival : jouer en ligne au centre de la carte
+- [ ] Comédie musicale Pokémon : déguiser son Pokémon pour un spectacle
+- [ ] Revanches contre tous les Champions avec équipes renforcées (Noir 2 / Blanc 2)
+- [ ] Récit plus adulte et rival aux motivations propres (N, la Team Plasma)
+- [ ] C-Gear : interface de l'écran du bas pour les connexions (à adapter à un seul écran)
+
 ## Repris des jeux modernes (hors Pokémon)
 - [ ] Mode photo complet : pause, caméra libre, filtres, profondeur de champ, poses (jeux Sony, Forza)
 - [ ] Voyage rapide depuis la carte, et marqueurs posés par le joueur (Zelda Breath of the Wild)
