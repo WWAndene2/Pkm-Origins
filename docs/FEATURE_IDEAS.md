@@ -138,6 +138,30 @@ supprime librement.
 - [ ] Mode streamer : codes masqués, musique sans droits, interactions du chat (Twitch)
 - [ ] Ateliers de mods en ligne (Steam Workshop)
 
+## Idées originales
+- [ ] Pokémon qui ont une mémoire : ils se souviennent des combats, des lieux, du dresseur d'origine, et réagissent en conséquence
+- [ ] Pokémon sauvages qui évoluent seuls avec le temps : une zone visitée tard a des formes plus évoluées
+- [ ] Écosystème : prédateurs et proies, une espèce trop capturée se raréfie, une autre la remplace
+- [ ] Pokémon qui apprennent en observant : une attaque vue souvent en combat peut être apprise
+- [ ] Rivalités entre Pokémon de l'équipe : jalousie, entente, bonus en combat en double selon leurs liens
+- [ ] Dresseurs PNJ qui capturent aussi : un Pokémon rare peut être pris par un autre avant toi
+- [ ] Journal du Pokémon : chaque Pokémon a son carnet (où il est né, ses victoires, ses dresseurs)
+- [ ] Héritage : un Pokémon âgé transmet une attaque ou un trait à un jeune de l'équipe
+- [ ] Météo provoquée par les combats : un Groudon libéré assèche vraiment la région, un Kyogre l'inonde
+- [ ] Villes qui changent selon tes actions : aider un quartier le fait grandir, l'ignorer le fait décliner
+- [ ] Rumeurs : les PNJ parlent de Pokémon rares vus récemment, vraies ou fausses
+- [ ] Chasseurs de primes : avis de recherche sur des Pokémon sauvages dangereux, récompenses
+- [ ] Métiers de dresseur : éleveur, chercheur, ranger, coordinateur, avec leurs propres missions
+- [ ] Musées vivants : tes captures rares exposées et visitables par d'autres joueurs
+- [ ] Pokémon gardiens de lieux : chaque route a un Pokémon fort qui la protège et qu'on peut gagner
+- [ ] Défi d'équipe thématique proposé par la région chaque semaine (une couleur, une forme, une taille)
+- [ ] Combats nocturnes et diurnes différents : certains talents ou types plus forts selon l'heure
+- [ ] Pokémon blessés : soins dans le monde avec baies et objets, au lieu du seul Centre Pokémon (option)
+- [ ] Mode « dresseur ancien » : jouer à une autre époque de la région (Hoenn d'il y a 3000 ans, la guerre de Kalos)
+- [ ] Rêves : la nuit, une courte séquence jouable montre le passé d'un de tes Pokémon
+- [ ] Langage des Pokémon : comprendre peu à peu ce que dit ton partenaire, selon votre lien
+- [ ] Pokémon qui choisissent leur dresseur : certains rares ne se capturent pas, ils te rejoignent si tu remplis leurs conditions
+
 ## Création et mods
 - [ ] Éditeur intégré (cartes, dresseurs, scripts) avec rechargement à chaud
 - [ ] Mods en paquets, installation en un clic
