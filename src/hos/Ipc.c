@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static const HosService* const services[] = {&hos_srv};
+static const HosService* const services[] = {&hos_srv, &hos_apt_a, &hos_apt_u, &hos_ndm_u, &hos_cfg_u, &hos_ptm_u, &hos_frd_u, &hos_boss_u};
 
 uint32_t hos_in(HosRequest* q, int k)
 {
@@ -27,6 +27,23 @@ int hos_out_handles(HosRequest* q, int k, int move, const uint32_t* handles, int
     for (int i = 0; i < n; i++)
         hos_out(q, k + 1 + i, handles[i]);
     return k + 1 + n;
+}
+
+int hos_out_static(HosRequest* q, int k, int id, const void* data, uint32_t size)
+{
+    Cpu* c = &q->thread->cpu;
+    uint32_t target = ld32(c, q->buffer + 0x100u + 8u * (uint32_t)id + 4u);
+    if (size)
+        memcpy(hos_memory + target, data, size);
+    hos_out(q, k, size << 14 | (uint32_t)id << 10 | 2u);
+    hos_out(q, k + 1, target);
+    return k + 2;
+}
+
+uint32_t hos_in_static(HosRequest* q, int k, uint32_t* size)
+{
+    *size = hos_in(q, k) >> 14;
+    return hos_in(q, k + 1);
 }
 
 const HosService* hos_service_find(const char* name)

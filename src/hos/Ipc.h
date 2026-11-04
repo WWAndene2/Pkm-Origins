@@ -35,6 +35,15 @@ void hos_reply(HosRequest* q, int normal, int translate);
 void hos_out(HosRequest* q, int k, uint32_t v);
 /* a translate descriptor for n handles copied (moved) and the handles, from word k; the next word returned */
 int hos_out_handles(HosRequest* q, int k, int move, const uint32_t* handles, int n);
+/* a static buffer descriptor (id) and the reply's data written where the game's thread set its receiving buffer up
+   (its local storage + 0x180 + 8 id: descriptor, address), from word k; the next word returned */
+int hos_out_static(HosRequest* q, int k, int id, const void* data, uint32_t size);
+/* a request's static buffer (descriptor at word k): its address and size */
+uint32_t hos_in_static(HosRequest* q, int k, uint32_t* size);
+/* a result code as Azahar's Result builds it (description, module, summary, level) */
+#define HOS_RESULT(description, module, summary, level) \
+    ((uint32_t)(description) | (uint32_t)(module) << 10 | (uint32_t)(summary) << 21 | (uint32_t)(level) << 27)
+
 /* a session to a service, as a new handle */
 uint32_t hos_session_open(const HosService* s);
 const HosService* hos_service_find(const char* name);
@@ -42,6 +51,6 @@ const HosService* hos_service_find(const char* name);
 enum { HOS_FAULT_SERVICE = 12 };
 
 /* the services, one file each in service/ */
-extern const HosService hos_srv;
+extern const HosService hos_srv, hos_apt_a, hos_apt_u, hos_ndm_u, hos_cfg_u, hos_ptm_u, hos_frd_u, hos_boss_u;
 
 #endif

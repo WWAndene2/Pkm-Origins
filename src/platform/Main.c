@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../hos/GameImage.h"
 #include "../hos/Kernel.h"
 #include "../hos/Loader.h"
 #include "../hos/Memory.h"
@@ -49,6 +50,10 @@ int main(int argc, char** argv)
     uint8_t* exheader = slurp(argv[1], "exheader.bin", &exheader_size);
     if (!code || !exheader || exheader_size < 0x400)
         return 1;
+    if (hos_game_open(argv[2])) {
+        fprintf(stderr, "hos: %s is not a decrypted .3ds\n", argv[2]);
+        return 1;
+    }
     if (hos_memory_init()) {
         fprintf(stderr, "hos: could not reserve the game's address space\n");
         return 1;
