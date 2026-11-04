@@ -121,7 +121,7 @@ built so that something runs early and grows (§2).
    unconditional branch. The comparison found and fixed: switch cases split off as functions (441), Thumb read as ARM
    and back, data tables taken for functions, the modules' relocated code pointers, a module known by its file name
    (DllEshop.cro is DllEShop).
-   `tools/arm2c.py` translates leaf functions (no call, no stack, integer only) to C; `tools/match_leaf.py` runs each
+   `tools/arm2c.py` translates leaf functions (no call, no stack, integer only) to C; `tools/match_leaf.py` (now `tools/match_functions.py`) ran each
    against the original instructions in Unicorn on random registers and memory, 20 trials each. Omega Ruby: 4,596
    translated, **4,000 matched, 0 mismatched**, 596 untestable (they read fixed global addresses outside the test memory).
    X: 4,378 translated, **3,875 matched, 0 mismatched**, 503 untestable. (A mismatch on the way was the matcher's:
