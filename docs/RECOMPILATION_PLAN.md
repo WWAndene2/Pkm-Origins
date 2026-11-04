@@ -26,7 +26,8 @@ built so that something runs early and grows (§2).
 3. **Decompilation by need.** A function someone wants to change or understand is rewritten as readable C, then checked
    to behave as the translated one (§4) before it replaces it. The readable share grows over time: the camera, the field,
    the battle, the menus first (what customising needs).
-4. **Customising last**, on matched code, behind options (widescreen, 60 fps, the merge of the two games).
+4. **Customising last**, on matched code, behind options (widescreen, 60 fps, the merge of the two games); the owner's
+   list of features: `docs/FEATURE_IDEAS.md`.
 
 ## 3. Components and their order
 
