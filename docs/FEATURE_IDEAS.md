@@ -261,22 +261,23 @@ Principe : la version fidèle garde tout tel quel ; chaque correction est une op
 ### Détail : les Champions de Kalos (équipes d'origine de mémoire, à vérifier dans les données ; propositions pour le mode « Rééquilibré »)
 | Champion | Équipe d'origine (X / Y) | Proposition | Stratégie |
 |---|---|---|---|
-| Violette (Insecte) | Arakdo, Prismillon | Arakdo, Cocobaba (Écaillon), Prismillon, Lépidonille | Poudre Dodo / Para, attaques de statut |
-| Lino (Roche) | Amagara, Ptyranidur | Amagara, Ptyranidur, Racaillou, Grolem d'Alola exclu (Kalos seulement) : Nosepass | Fossiles, Piège de Roc, Rapidité |
+| Violette (Insecte) | Arakdo, Prismillon | Arakdo, Papilusion, Dardargnan, Prismillon | Poudre Dodo / Para, attaques de statut |
+| Lino (Roche) | Amagara, Ptyranidur | Racaillou, Tarinor, Amagara, Ptyranidur | Fossiles, Piège de Roc, Rapidité |
 | Cornélia (Combat) | Kungfouine, Machopeur, Brutalibré | + Riolu / Lucario (Méga au 2e combat de la Tour) | Vitesse, Brutalibré en tête, Méga-Lucario en revanche |
-| Amaro (Plante) | Granivol, Boustiflor, Chevroum | + Roserade, Pandarbare | Soin (Synthèse, Vampigraine), Fil Toxik |
-| Lem (Électrique) | Émolga, Magnéton, Iguolta | + Rotom, Galvaran | Écran Lumière, Change Éclair, Soleil pour Iguolta |
-| Valériane (Fée) | Mysdibule, M. Mime, Nymphali | + Flabébé en Florges, Pomdorochi | Mur Lumière, Peau Féérique, Méga-Mysdibule en revanche |
-| Astera (Psy) | Bérylis, Roigada, Mistigrix | + Spectrum (Psy), Gardevoir | Distorsion, Écran Psy |
+| Amaro (Plante) | Cotovol, Boustiflor, Chevroum | + Roserade, Tropius | Soin (Synthèse, Vampigraine), Fil Toxik |
+| Lem (Électrique) | Émolga, Magnéton, Iguolta | + Rotom, Ohmassacre | Écran Lumière, Change Éclair, Soleil pour Iguolta |
+| Valériane (Fée) | Mysdibule, M. Mime, Nymphali | + Florgès, Cupcanaille | Mur Lumière, Peau Féérique, Méga-Mysdibule en revanche |
+| Astera (Psy) | Cryptéro, Roigada, Mistigrix | + Xatu, Gardevoir | Distorsion, Écran Psy |
 | Urup (Glace) | Blizzaroi, Hexagel, Séracrawl | + Mamouswine, Polagriffe | Grêle, Méga-Blizzaroi en revanche |
 
 Remarques :
+- Noms français écrits de mémoire et relus une fois ; à confirmer avec les textes du jeu.
 - Le nombre passe de 2-3 à 4-6 selon l'ordre de l'arène ; les niveaux suivent le Multi Exp. si celui-ci reste actif.
 - Chaque Champion garde son as d'origine en dernier (fidèle à son identité).
 - Les noms et équipes d'origine viennent de la mémoire de l'agent : à confirmer dans les données des dresseurs (outils de Pomegrade, `tools/remake`) avant de rien changer.
 
 ### Détail : Conseil 4 et Maître (proposition)
-- [ ] Malva (Feu), Thyméo (Eau), Narcisse (Acier), Watson (Dragon) : de 4 à 6 Pokémon, une Méga-Évolution chacun (Méga-Houndoom, Méga-Blastoise, Méga-Steelix, Méga-Dracaufeu X).
+- [ ] Malva (Feu), Thyméo (Eau), Narcisse (Acier), Dracéna (Dragon) : de 4 à 6 Pokémon, une Méga-Évolution chacun (Méga-Démolosse, Méga-Tortank, Méga-Steelix, Méga-Dracaufeu X).
 - [ ] Dianthéa : 6 Pokémon complets avec objets, Méga-Gardevoir en dernier, une couverture de types sans faiblesse partagée.
 - [ ] Revanche : niveaux 70+, équipes de compétition (stats et talents choisis).
 
