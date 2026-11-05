@@ -307,6 +307,11 @@ def main():
                 del cf[x]
         extra = [(x | (x in cthumb or x in cent), arm2c.fname(x), cf[x][0]) for x in sorted(cf)]
     tmp = a.keep or tempfile.mkdtemp()
+    if not a.keep:  # the generated C and its objects (about 600 MB a game) go when the run ends, however it ends
+        import atexit
+        import shutil
+        main_pid = os.getpid()
+        atexit.register(lambda: os.getpid() == main_pid and shutil.rmtree(tmp, ignore_errors=True))
     os.makedirs(tmp, exist_ok=True)
     # the C in one file per job (compiled at once), each with the declarations; the first has the trial machinery and
     # the tables
