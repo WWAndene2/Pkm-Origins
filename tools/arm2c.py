@@ -1126,6 +1126,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         if returned and max(targets, default=0) <= i.address:
             break
         returned = False
+    if not insns:  # (nothing decoded: every word data, a module's relocated table where a function was listed)
+        raise Unsupported("no code: only data")
     if not returned:
         last = insns[-1] if insns else None
         if last is not None and last.cc in (0, 15) and last.mnemonic == "b" and start <= last.operands[0].imm < end_code:
