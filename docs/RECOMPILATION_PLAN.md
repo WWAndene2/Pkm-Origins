@@ -512,6 +512,19 @@ full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResource
   0x7FFF0000 | entry), the vertex program's index at the block's word 0, the geometry program's at word 1 (-1: none).
   So the shaders reach the GPU from the BCH's shader records, once a model; the renderer reads those records and
   their translated SPIR-V instead.
+- **A BCH material's render state** (SPICA's H3DMaterialParams.cs and H3DMaterial.cs, read on GitHub, 5 November;
+  public domain): its fields (flags, fragment flags, the shader, 3 texture coordinates, light set and fog indexes,
+  emission / ambient / diffuse / two specular / six constant / blend colours, colour scale, the lighting tables'
+  names, layer and translucency, Fresnel and bump settings, polygon offset) and, for the fixed fragment stages, **PICA
+  command words stored in the file**: `LUTConfigCommands` (the lighting tables' inputs: LUTINPUT_ABS, _SELECT,
+  _SCALE) and `FragmentShaderCommands` (the six combiner stages: source, operand, combiner, colour, scale each; the
+  combiner buffer; colour operation; blending; alpha test; stencil test and operation; depth and colour mask; face
+  culling; colour and depth buffer read / write; and vertex shader uniforms: texture matrices, translations,
+  ambient and diffuse colours). A material's textures come as `TextureCommands` (unit config, border colour,
+  dimensions, filter and wrap, LOD, address, format) and 3 texture mappers. So the renderer reads these words as part
+  of the file's format, once when a model loads (as SPICA does), to make the material's pipeline key and constants:
+  a file format that happens to be PICA command words, not the game's GPU traffic translated each frame (decision 1
+  holds).
 - To read next: the 0x174-byte material record and the mesh node in full (their fields as `Gfx_BuildCommandList` and
   the draw path read them), the BCH material's parameter block (Bch.h has its render state, inferred from 12,481
   materials), and the shaders' records (SPICA's H3DShader: the program and its uniforms).
