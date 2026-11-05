@@ -414,4 +414,16 @@ Performance comes first in every design choice, the more so for the seamless co-
    | 0x13EA34, 0x123888 | 3.0 % | each frame | rasterizer (viewport), output (framebuffer, blending) |
    So the vertex shaders come from the game's files (step 4: translated once to SPIR-V, as §8 planned), the
    materials and vertex layouts are built once per scene, and each frame sets matrices, textures, the framebuffer
-   and draws. Next: what these per-frame functions are given (objects, cameras), read from their code.
+   and draws. What the per-frame functions are (read from their code, Ghidra through Pomegrade's
+   tools/remake/ghidra/decompile.sh; roles inferred from it, not yet checked against a run):
+   - 0x152888 walks a scene tree: each node's virtual function at +0x74, then its children (a list at +0x14), as
+     their flags (+0xB3, +0xB5, +0xB6) allow.
+   - 0x4BE5D0 draws a mesh node: `Gfx_UpdateDrawState` only when the node is marked changed (that is where
+     `Gfx_BuildCommandList` builds its list, once), then 0x323C8C submits the node's built buffer (+0x100) with its
+     material (+0x104).
+   - 0x4BE1E0 batches sprites (2D quads): per sprite, its 3x4 matrix (0x144CA8: a 48-byte copy) into the batch's
+     uniform staging, a texture change (0x323810, 0x323D98) flushing the batch; 0x32430C flushes it: the matrices as
+     vertex shader uniforms, then one draw of count x 6 indices (two triangles a sprite).
+   So at the title the per-frame work is a scene walk, prebuilt mesh buffers resubmitted, and batched sprites. For
+   Vulkan: a mesh node's buffer becomes a pipeline and descriptor set made when it is built; a sprite batch, one
+   instanced draw with its matrices in a uniform (or storage) buffer.
