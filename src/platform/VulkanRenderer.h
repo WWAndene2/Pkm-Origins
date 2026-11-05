@@ -23,4 +23,8 @@ void vk_renderer_draw(PicaState* state, int indexed);
 /* a display transfer from physical address source: the frame of that render target written out */
 void vk_renderer_display(uint32_t source);
 
+/* a memory fill (GSP's) of physical start-end with value (width_bits: 0 16-bit, 1 24-bit, 2 32-bit): a render target or
+   its depth buffer cleared when the fill covers it */
+void vk_renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t width_bits);
+
 #endif

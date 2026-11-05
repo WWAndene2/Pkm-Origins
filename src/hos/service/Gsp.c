@@ -167,7 +167,11 @@ static void trigger_cmd_req_queue(HosRequest* q)
                         (unsigned long long)frames);
             signal(P3D);
             break;
-        case 2: /* MemoryFill: start1, value1, end1, start2, value2, end2, controls */
+        case 2: /* MemoryFill: start1, value1, end1, start2, value2, end2, controls (each 16 bits: width in 8-9) */
+            if (w[1])
+                renderer_fill(w[1], w[3], w[2], w[7] >> 8 & 3);
+            if (w[4])
+                renderer_fill(w[4], w[6], w[5], w[7] >> 24 & 3);
             if (w[1])
                 signal(PSC0);
             if (w[4])

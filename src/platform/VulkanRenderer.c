@@ -226,7 +226,7 @@ int vk_renderer_init(void)
 
 /* render targets, by the colour buffer's physical address */
 enum { TARGETS = 16 };
-static struct { uint32_t address, width, height; Image color, depth; VkFramebuffer fb; int used; } targets[TARGETS];
+static struct { uint32_t address, width, height, depth_address; Image color, depth; VkFramebuffer fb; int used; } targets[TARGETS];
 
 static int target_for(uint32_t address, uint32_t width, uint32_t height)
 {
@@ -428,7 +428,9 @@ static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
     /* culling (0x040: 0 keep all, 1 keep clockwise, 2 keep counter-clockwise) */
     const uint32_t cull = BITS(r[0x040], 0, 2);
     rs.cullMode = cull == 0 ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
-    rs.frontFace = cull == 1 ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    /* (the PICA's orientation as seen in Vulkan's framebuffer, y down: the opposite of its own; checked on ORAS's
+       opening, 5 November: the other way culled the ground and the plants) */
+    rs.frontFace = cull == 1 ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
     VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, NULL, 0, VK_SAMPLE_COUNT_1_BIT};
     VkPipelineDepthStencilStateCreateInfo ds = {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
     const uint32_t d = r[0x107];
@@ -457,6 +459,13 @@ static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
     VkPipelineDynamicStateCreateInfo dy = {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, NULL, 0, 3, dyn};
     VkGraphicsPipelineCreateInfo gi = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, NULL, 0, 2, stages, &vi, &ia,
                                        NULL, &vp, &rs, &ms, &ds, &cb, &dy, pipe_layout, render_pass, 0};
+    /* $HOS_RENDER_LOOSE (a diagnostic): no culling, no depth or stencil test, to see what those tests remove */
+    const char* loose = getenv("HOS_RENDER_LOOSE"); /* any of "cull", "depth", "stencil" */
+    if (loose) {
+        if (strstr(loose, "cull")) rs.cullMode = VK_CULL_MODE_NONE;
+        if (strstr(loose, "depth")) ds.depthTestEnable = VK_FALSE;
+        if (strstr(loose, "stencil")) ds.stencilTestEnable = VK_FALSE;
+    }
     VkPipeline p = VK_NULL_HANDLE;
     vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &gi, NULL, &p);
     if (pipeline_count < PIPELINES) {
@@ -467,6 +476,7 @@ static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
 }
 
 static Buffer vertices, uniforms, luts;
+unsigned long long vk_skips[8]; /* draws not drawn, by reason (renderer_report prints them) */
 static PicaVertex triangles[1 << 18];
 
 void vk_renderer_draw(PicaState* s, int indexed)
@@ -477,18 +487,16 @@ void vk_renderer_draw(PicaState* s, int indexed)
     const uint32_t width = BITS(r[0x11E], 0, 11), height = BITS(r[0x11E], 12, 10) + 1;
     const uint32_t color_address = BITS(r[0x11D], 0, 28) * 8;
     const int t = target_for(color_address, width, height);
-    if (t < 0)
-        return;
+    if (t < 0) { vk_skips[0]++; return; }
+    targets[t].depth_address = BITS(r[0x11C], 0, 28) * 8;
     const long n = pica_vertex_draw(s, indexed, triangles, 1 << 18);
-    if (n <= 0)
-        return;
+    if (n <= 0) { vk_skips[n < 0 ? 1 : 2]++; return; }
     static char frag[1 << 17];
     const long len = pica_fragment_glsl(s, frag, sizeof frag);
     if (len < 0)
         return;
     VkPipeline p = pipeline_for(s, frag, len);
-    if (!p)
-        return;
+    if (!p) { vk_skips[3]++; return; }
     if (!vertices.buf && (make_buffer(&vertices, sizeof triangles, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ||
                           make_buffer(&uniforms, sizeof(PicaFragmentUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) ||
                           make_buffer(&luts, 24 * 256 * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)))
@@ -505,8 +513,10 @@ void vk_renderer_draw(PicaState* s, int indexed)
         if (r[0x080] >> u & 1)
             v = texture_view(s, BITS(r[addr_reg[u]], 0, 28) * 8, BITS(r[dim_reg[u]], 16, 11), BITS(r[dim_reg[u]], 0, 11),
                              r[fmt_reg[u]] & 0xF);
-        if (!v)
+        if (!v) {
+            if (r[0x080] >> u & 1) vk_skips[4]++;
             v = targets[0].color.view;
+        }
         images[u] = (VkDescriptorImageInfo){sampler_for(r[param_reg[u]]), v, VK_IMAGE_LAYOUT_GENERAL};
     }
     vkResetDescriptorPool(dev, desc_pool, 0);
@@ -583,5 +593,36 @@ void vk_renderer_display(uint32_t source)
             if (targets[k].used)
                 fprintf(stderr, " %08X %ux%u", targets[k].address, targets[k].width, targets[k].height);
         fprintf(stderr, ")\n");
+    }
+}
+
+void vk_renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t width_bits)
+{
+    if (ready != 0)
+        return;
+    for (int k = 0; k < TARGETS; k++) {
+        if (!targets[k].used)
+            continue;
+        const uint32_t size = targets[k].width * targets[k].height * 4;
+        const int color = start <= targets[k].address && end >= targets[k].address + size / 2;
+        const int depth = targets[k].depth_address && start <= targets[k].depth_address &&
+                          end >= targets[k].depth_address + size / 2;
+        if (!color && !depth)
+            continue;
+        begin();
+        if (color) { /* an RGBA8 pixel in memory: A B G R, the fill value R G B A from its high byte */
+            VkClearColorValue c = {{(float)(value >> 24 & 0xFF) / 255.0f, (float)(value >> 16 & 0xFF) / 255.0f,
+                                    (float)(value >> 8 & 0xFF) / 255.0f, (float)(value & 0xFF) / 255.0f}};
+            if (width_bits != 2) { /* (a 16- or 24-bit fill of a colour target: not met yet) */
+                c.float32[0] = c.float32[1] = c.float32[2] = c.float32[3] = 0;
+            }
+            VkImageSubresourceRange cr = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            vkCmdClearColorImage(cmd, targets[k].color.image, VK_IMAGE_LAYOUT_GENERAL, &c, 1, &cr);
+        } else { /* D24S8: depth the low 24 bits, stencil the high 8 */
+            VkClearDepthStencilValue ds = {(float)(value & 0xFFFFFF) / 16777215.0f, value >> 24};
+            VkImageSubresourceRange dr = {VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1};
+            vkCmdClearDepthStencilImage(cmd, targets[k].depth.image, VK_IMAGE_LAYOUT_GENERAL, &ds, 1, &dr);
+        }
+        submit();
     }
 }

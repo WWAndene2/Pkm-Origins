@@ -155,8 +155,10 @@ void renderer_submit_list(uint32_t address, uint32_t size)
     pica_state_run(&state, (const uint32_t*)(hos_memory + address), size / 4);
 }
 
+extern unsigned long long vk_skips[8];
 void renderer_report(void)
 {
+    fprintf(stderr, "renderer: draws skipped: no target %llu, memory %llu, no triangles %llu, no pipeline %llu; texture units with no texture %llu\n", vk_skips[0], vk_skips[1], vk_skips[2], vk_skips[3], vk_skips[4]);
     if (!stats)
         return;
     fprintf(stats, "# draws %llu, triangles %llu; vertices %llu, of them finite %llu, inside the screen %llu\n"
@@ -164,6 +166,18 @@ void renderer_report(void)
     for (int k = 0; k < KEYS && census[k].key[0]; k++)
         fprintf(stats, "%s\t%llu\n", census[k].key, census[k].draws);
     fclose(stats);
+}
+
+static uint32_t to_physical(uint32_t va)
+{
+    if (va >= 0x1F000000u && va < 0x1F600000u) return va - 0x07000000u;
+    if (va >= 0x14000000u && va < 0x1C000000u) return va + 0x0C000000u;
+    return va;
+}
+
+void renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t width_bits)
+{
+    vk_renderer_fill(to_physical(start), to_physical(end), value, width_bits);
 }
 
 void renderer_display(uint32_t source)
