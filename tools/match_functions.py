@@ -195,6 +195,8 @@ def main():
                    "own code, 4 November)")
     p.add_argument("--untested", help="write the functions with no valid trial there: address, then why their trials "
                    "were rejected (the translated C's fault codes, src/hos/Cpu.h and arm2c.py, and how many trials each)")
+    p.add_argument("--retest", help="a --untested file of an earlier run: only its functions are tested (all are still "
+                   "translated, for the calls), as a second pass over another --ram dump (another moment of the game)")
     p.add_argument("--ram", help="a folder of the game's memory (code.bin, heap.bin, linear.bin, stack.bin) under the tests")
     a = p.parse_args()
     code = open(a.code, "rb").read()
@@ -282,6 +284,9 @@ def main():
                 keep.add(k)
                 todo.extend(deps[k])
         funcs = {k: v for k, v in funcs.items() if k in keep}
+    retest = None
+    if a.retest:
+        retest = {int(l.split("\t")[0], 16) for l in open(a.retest) if not l.startswith("#")}
     with_calls = sum(1 for s in funcs if deps[s])
     funcs = [(s, c, n) for s, (c, n) in sorted(funcs.items())]
     # --with-code: the .code translated too, compiled beside the module and found by call_indirect (the module's calls
@@ -442,6 +447,14 @@ def main():
                 so.protect(u[1] + u[5].code_start, u[1] + u[5].code_end)
         heap_pages = [addr + o for addr, d in regions if addr == 0x08000000 for o in range(0, len(d), 0x1000)
                       if any(d[o:o + 0x1000])]
+        # and the heap's objects as the game refers to them: every aligned heap address a heap word points to (an
+        # object's start, or a field the game keeps a pointer to), so that a register handed one finds real fields
+        referenced = []
+        for addr, d in regions:
+            if addr == 0x08000000:
+                words = struct.unpack("<%dI" % (len(d) // 4), d)
+                referenced = sorted({w for w in words if addr <= w < addr + len(d) - 0x100 and not w & 3})
+
         def at_mapped(x):
             return MB <= x < MB + MS or any(addr <= x < addr + len(d) for addr, d in regions)
         so.fault_at.restype = ctypes.c_uint32
@@ -476,7 +489,7 @@ def main():
         uc.mem_write(CLREX, bytes.fromhex("1ff07ff5"))
         matched, mismatched, untested, thumb_matched = 0, [], [], 0
         for idx, (s, _, _) in enumerate(funcs):
-            if idx % jobs != job:
+            if idx % jobs != job or retest is not None and s not in retest:
                 continue
             if job == 0 and idx % (500 * jobs) == 0:  # progress, on stderr (a whole game is minutes)
                 sys.stderr.write("  %d / %d functions tested, %d s\n" % (idx, len(funcs), time.time() - began))
@@ -491,6 +504,8 @@ def main():
                 choices = [lambda: MB + rng.randrange(0, MS // 2, 4), lambda: rng.getrandbits(32), lambda: rng.randrange(0, 64)]
                 if heap_pages:
                     choices.append(lambda: rng.choice(heap_pages) + rng.randrange(0, 0x1000, 4))
+                if referenced:
+                    choices.append(lambda: rng.choice(referenced))
                 if trial % 2:  # a trial of pointers: every register one, into the test memory or the game's heap
                     regs = [rng.choice(choices[:1] + choices[3:])() for _ in range(13)]
                     mem = rng.choice(dense)
@@ -641,7 +656,8 @@ def main():
         os.wait()
     mismatched.sort()
     print("%d functions in the list; %d translated (%d of them call others); %d matched, %d mismatched, %d with no valid "
-          "trial" % (len(starts), len(funcs), with_calls, matched, len(mismatched), len(untested)))
+          "trial%s" % (len(starts), len(funcs), with_calls, matched, len(mismatched), len(untested),
+                                     " (of the %d retested)" % len(retest) if retest is not None else ""))
     print("  Thumb: %d in the list, %d translated, %d matched" % (len(thumb - entry_thumb), sum(1 for f in funcs if f[0] in thumb),
                                                                thumb_matched))
     for s, why in mismatched[:20]:
