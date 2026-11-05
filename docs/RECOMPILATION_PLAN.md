@@ -435,3 +435,10 @@ Performance comes first in every design choice, the more so for the seamless co-
    `Gfx_BuildCommandList`), once; 0x323C8C draws a node that has a 2D layout part (+0xD8, +0xDC) through 0x337F6C.
    Still to read for the renderer's interface: `Gfx_BuildCommandList`'s inputs field by field (306 lines), the
    material record (+0x104), and how a BCH's meshes, materials and shaders become these nodes when a model loads.
+   `Gfx_BuildCommandList` (first reading): its list is a record (render state + 0x44) holding the command buffer
+   (+0x10, words used +0x1C), a count of draw items (+4, +6) and the items at +0x28, 0x2C bytes each, each pointing
+   (+0x28) at a draw record: its key (+8: the items sharing it are drawn together, the light and matrix commands
+   flushed between keys), its vertex buffer (+0xC), its primitive kind (+0x10: 8 and 0xB set one shader setup, other
+   values another), and a virtual at +4 then + 100 giving one more register value; command templates are copied from
+   the program's data (0x338D84...: 0x60, 0x30 and 0x10 bytes). Each item's own word at +0x38 is compared byte-swapped
+   with the last (a sort key). Still to read: the rest of its loop, the draw record in full, and what fills the items.
