@@ -545,7 +545,26 @@ full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResource
   part), state block (+0xD4) and count (+0xFA), changed flag (+0xFE), built buffer (+0x100), layout positions (+0xD8,
   +0xDC), its object constants (+0x48, +0x4C, matrix at +0x80), draw flags (+0xB3-0xB6); the rest is read when the
   replacements are written, against the code.
-- To read next: the mesh node in full (their fields as `Gfx_BuildCommandList` and
+- **Correction (5 November, later): what was read above is the 2D path.** The "mesh node" drawn by 0x4BE5D0 is a
+  textured 2D quad (a layout pane or billboard): `Gfx_TextureSetupFromHeader` (0x326DD0) reads its texture (+0xE0),
+  texture offsets (+0xEC, +0xF0), wrap and filter modes (+0xFC, +0xFD), two colours (+0xD8, +0xDC: a gradient when
+  they differ), and 0x4BE4EC its 3x4 matrix (+0x80) with a pivot (+0x48), Y flipped; two node classes share a base
+  (vtables 0x5DBECC: the quad, draw 0x4BE5D0; 0x5DBE40: a batched one, draw 0x4BE1E0, its material at +0x13C).
+  `Gfx_BuildCommandList` batches those quads. The trace had missed the 3D models because it read only the submitted
+  lists: the GPU jumps (GPUREG_CMDBUF_ADDR / SIZE / JUMP, 0x238-0x23D) into other buffers, the models' own. Followed
+  now (GpuTrace.c): on the field, 8,929 buffers reached by jumps in 150 s, 13 % of the words, and the 3D path shows:
+  - the models' buffers written by `Res_DecompressLz10Lz11` (0x15F800): the BCH files, decompressed from the
+    archives, jumped to in place; what they set there is vertex shader code (the programs uploaded again when the
+    shader changes: the PICA200's code memory is small);
+  - 0x184020 (called from 0x2F3000-0x31B000: the H3D runtime, to read) writing shader configuration (40 %),
+    combiners, draws, textures, vertex attributes, uniforms: a model's state each draw; also the one geometry shader
+    user;
+  - 0x1237BC (combiners 67 %, lighting, output), 0x1F8FD8 and 0x123C78 (vertex attributes 82-84 %: a mesh's
+    buffers), 0x3085D8 (blending, textures, lighting), 0x1F844C (rasterizer, geometry pipeline), and the shader
+    setup (0x4A7A34, 0x31F808, 0x1F8070).
+  So step 1 is not done: the 3D path (0x184020 and the H3D runtime calling it) is to read the same way, and
+  `symbols/gfx_library.tsv`'s "mesh node" rows renamed for what they are (2D quads).
+- To read next: the 3D path above (their fields as `Gfx_BuildCommandList` and
   the draw path read them), the BCH material's parameter block (Bch.h has its render state, inferred from 12,481
   materials), and the shaders' records (SPICA's H3DShader: the program and its uniforms).
 

@@ -242,39 +242,19 @@ static void count_value(uint32_t reg, uint32_t value)
         }
 }
 
-static void read_commands(uint32_t address, uint32_t size)
-{
-    uint32_t n = size / 4, i = 0;
-    while (i + 1 < n) {
-        uint32_t header, *o;
-        memcpy(&header, hos_pointer(address + 4 * (i + 1)), 4);
-        uint32_t reg = header & 0xFFFF, extra = (header >> 20) & 0xFF, consecutive = header >> 31;
-        for (uint32_t k = 0; k <= extra && i + (k ? k + 1 : 0) < n; k++) {
-            uint32_t at = address + 4 * (k ? i + 1 + k : i), value;
-            memcpy(&value, hos_pointer(at), 4);
-            count_value(consecutive ? reg + k : reg, value);
-            o = origin_of(at);
-            if (o && *o)
-                credit_register(*o, consecutive ? reg + k : reg, *epoch_at(o) + 32 >= (uint32_t)lists);
-        }
-        i += 2 + extra + (extra & 1);
-    }
-}
+static unsigned long long chained_words, chained_buffers;
 
-void hos_gpu_trace_list(uint32_t address, uint32_t size)
+/* a buffer's words credited to their origins */
+static void credit_words(uint32_t address, uint32_t size)
 {
-    lists++;
-    if (address - HOS_LINEAR >= SPAN) {
-        outside++;
-        return;
-    }
     for (uint32_t k = 0; k < size; k += 4) {
         uint32_t* o = origin_of(address + k);
         uint32_t id = o ? *o : 0;
-        /* fresh: stored in the last 32 lists (about 6 frames at the title's 5 lists a frame); older words were built
-           earlier and are submitted again */
-        int is_fresh = o && *epoch_at(o) + 32 >= (uint32_t)lists;
+        int is_fresh = 0;
         if (o) {
+            /* fresh: stored in the last 32 lists (about 6 frames at 5 lists a frame); older words were built earlier
+               and are submitted again */
+            is_fresh = *epoch_at(o) + 32 >= (uint32_t)lists;
             uint32_t age = (uint32_t)lists - *epoch_at(o);
             ages[age < 2 ? 0 : age < 8 ? 1 : age < 32 ? 2 : age < 256 ? 3 : 4]++;
         }
@@ -295,7 +275,62 @@ void hos_gpu_trace_list(uint32_t address, uint32_t size)
             }
         }
     }
-    read_commands(address, size);
+}
+
+/* the GPU's physical addresses as the game sees them: FCRAM (0x20000000) is the linear heap, VRAM (0x18000000) its own */
+static uint32_t virtual_of(uint32_t physical)
+{
+    if (physical - 0x20000000u < 0x08000000u)
+        return physical - 0x20000000u + HOS_LINEAR;
+    if (physical - 0x18000000u < 0x00600000u)
+        return physical - 0x18000000u + 0x1F000000u;
+    return 0;
+}
+
+/* a command buffer read as the PICA200 reads it (see credit_register), following its jumps into other buffers
+   (GPUREG_CMDBUF_SIZE0/1 0x238-0x239 and ADDR0/1 0x23A-0x23B, in 8-byte units of physical memory, then JUMP0/1
+   0x23C-0x23D): the models' own command buffers, in their files, are reached that way */
+static void read_commands(uint32_t address, uint32_t size, int depth)
+{
+    uint32_t n = size / 4, i = 0, sizes[2] = {0}, addresses[2] = {0};
+    while (i + 1 < n) {
+        uint32_t header, *o;
+        memcpy(&header, hos_pointer(address + 4 * (i + 1)), 4);
+        uint32_t reg = header & 0xFFFF, extra = (header >> 20) & 0xFF, consecutive = header >> 31;
+        for (uint32_t k = 0; k <= extra && i + (k ? k + 1 : 0) < n; k++) {
+            uint32_t at = address + 4 * (k ? i + 1 + k : i), value, r = consecutive ? reg + k : reg;
+            memcpy(&value, hos_pointer(at), 4);
+            count_value(r, value);
+            o = origin_of(at);
+            if (o && *o)
+                credit_register(*o, r, *epoch_at(o) + 32 >= (uint32_t)lists);
+            if (r == 0x238 || r == 0x239)
+                sizes[r - 0x238] = value * 8;
+            else if (r == 0x23A || r == 0x23B)
+                addresses[r - 0x23A] = value * 8;
+            else if ((r == 0x23C || r == 0x23D) && depth < 8) {
+                uint32_t sub = virtual_of(addresses[r - 0x23C]), bytes = sizes[r - 0x23C];
+                if (sub && bytes && bytes < 0x100000) {
+                    chained_buffers++;
+                    chained_words += bytes / 4;
+                    credit_words(sub, bytes);
+                    read_commands(sub, bytes, depth + 1);
+                }
+            }
+        }
+        i += 2 + extra + (extra & 1);
+    }
+}
+
+void hos_gpu_trace_list(uint32_t address, uint32_t size)
+{
+    lists++;
+    if (address - HOS_LINEAR >= SPAN) {
+        outside++;
+        return;
+    }
+    credit_words(address, size);
+    read_commands(address, size, 0);
     if (lists <= 16 || !(lists % 256))
         hos_gpu_trace_write(); /* (also early: a run can stop before the GSP's first report) */
 }
@@ -333,6 +368,8 @@ void hos_gpu_trace_write(void)
         return;
     fprintf(f, "# lists %llu, words %llu, of no known origin %llu, lists outside the linear heap %llu\n", lists, words,
             unknown, outside);
+    fprintf(f, "# buffers reached by jumps %llu, their words %llu (counted in the words above)\n", chained_buffers,
+            chained_words);
     fprintf(f, "# words by age (lists since stored): <2 %llu, <8 %llu, <32 %llu, <256 %llu, older %llu\n", ages[0],
             ages[1], ages[2], ages[3], ages[4]);
     fprintf(f, "# kind\twriter, or copy's caller (or RomFS offset)\tits caller (or length)\tthat one's\tand its\twords"

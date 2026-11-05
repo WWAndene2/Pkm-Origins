@@ -6,13 +6,13 @@
 # helper (kept: the replaced ones call it, or nothing needs it once they are replaced), to read (not yet understood).
 # oras	x	name	role	action	known by
 00152888	001525B8	Gfx_SceneNode_Visit	walks a scene tree: each node's virtual at +0x74, then its children (+0x14 list)	helper	read
-004BE5D0	0048D920	Gfx_MeshNode_Draw	draws a mesh node: builds its state when changed (+0xFE), then submits its built buffer (+0x100) with its material (+0x104)	replace	read
+004BE5D0	0048D920	Gfx_QuadNode_Draw	draws a 2D quad node (a layout pane or billboard: texture +0xE0, colours +0xD8 / +0xDC, matrix +0x80): builds its state when changed (+0xFE), then submits its built buffer (+0x100) with its material (+0x104)	replace	read
 00326FA8	00311B90	Gfx_UpdateDrawState	a node's draw state: default state, textures, its state block (+0xD4, count +0xFA), then the command list	replace	read
 0033899C	00323420	Gfx_BuildCommandList	a node's command buffer, built once: draw items grouped by draw record, their two vec4 constants batched 25 at a time	replace	read, traced
 0033917C	00323C00	Gfx_FlushLightAndMatrixCommands	the batched constants and draw commands of Gfx_BuildCommandList	replace	read, traced
 004BE1E0	0048D3B0	Gfx_Batch_AddObject	an object's 3x4 matrix and constants into the batch's uniform staging, flushing on a texture change	replace	read, traced
 0032430C	0030EF0C	Gfx_Batch_Flush	the batch's uniforms, then one draw of count x 6 indexes	replace	read, traced
-00323C8C	0030E88C	Gfx_MeshNode_DrawLayout	a node's draw with its 2D layout part (+0xD8, +0xDC), through 0x337F6C	replace	read
+00323C8C	0030E88C	Gfx_QuadNode_DrawLayout	a quad node's draw with its 2D layout part (+0xD8, +0xDC), through 0x337F6C	replace	read
 00337F6C	003229F0	Gfx_Layout_WriteCommands	a layout part's commands (uniforms, draw)	replace	traced
 003388F0	00323374	Gfx_Batch_WriteExtraUniforms	a batch's extra vec4 uniforms	replace	traced
 00323D98	0030E998	Gfx_SetTextures	texture unit commands between draws	replace	traced
@@ -25,7 +25,7 @@
 0019B6E8	00199DEC	Gfx_WriteMatrix3x4Command	a 3x4 matrix into a uniform upload command	helper	read
 0013EA34	0013F804	Gfx_SetViewport	rasterizer and output state each frame (viewport, framebuffer)	replace	traced
 00123888	00122D3C	Gfx_SetFramebufferBlend	output state each frame (blending, framebuffer)	replace	traced
-00184020	00183018	Gfx_GeometryShaderEffect	the only user of the geometry shader seen (120 settings in 150 s on the field)	to read	traced
+00184020	00183018	Gfx_H3d_WriteDrawState	a 3D model's state for each draw (shader configuration, combiners, textures, attributes, uniforms; the one geometry shader user), called by the H3D runtime at 0x2F3000-0x31B000	to read	traced
 00300B28	00300EF8	memcpy	the C library's copy (unaligned head, then 0x144D28)	helper	read
 00144D28	00144F34	memcpy_aligned	the copy's aligned part (ldm / stm by 32 bytes)	helper	read
 0031FC24	-	Gfx_ModelResourceSetup	a BCH used in place: header checked, relocated, materials' uniforms set up	input	read
