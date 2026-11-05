@@ -195,6 +195,9 @@ def main():
                    "own code, 4 November)")
     p.add_argument("--untested", help="write the functions with no valid trial there: address, then why their trials "
                    "were rejected (the translated C's fault codes, src/hos/Cpu.h and arm2c.py, and how many trials each)")
+    p.add_argument("--replay", help="with --only: a regs.txt that src/hos/GpuTrace.c's $HOS_CAPTURE wrote at the "
+                   "function's entry in a real run (its folder holds that moment's memory, given as --ram): the first "
+                   "trial runs on those registers, the rest stay random")
     p.add_argument("--retest", help="a --untested file of an earlier run: only its functions are tested (all are still "
                    "translated, for the calls), as a second pass over another --ram dump (another moment of the game)")
     p.add_argument("--ram", help="a folder of the game's memory (code.bin, heap.bin, linear.bin, stack.bin) under the tests")
@@ -285,6 +288,7 @@ def main():
                 todo.extend(deps[k])
         funcs = {k: v for k, v in funcs.items() if k in keep}
     retest = None
+    replay = [int(x, 16) for x in open(a.replay).read().split()] if a.replay else None
     if a.retest:
         retest = {int(l.split("\t")[0], 16) for l in open(a.retest) if not l.startswith("#")}
     with_calls = sum(1 for s in funcs if deps[s])
@@ -526,10 +530,15 @@ def main():
                 fflags = rng.getrandbits(4)
                 # the rounding mode: the kernel's (toward zero) or the one the game sets at its start (to nearest)
                 fpscr = rng.choice((FPSCR, FPSCR_GAME))
+                sp = MB + MS - 0x100
+                if replay and s == a.only and trial == 0:  # the inputs the game gave it (sp on the game's own stack)
+                    regs, sp = replay[:13], replay[13]
+                    flags = (replay[16] << 3) | (replay[17] << 2) | (replay[18] << 1) | replay[19]
+                    fregs, fpscr, fflags = replay[20:52], replay[52] & 0x0FFFFFFF, replay[52] >> 28
                 cpu = Cpu()
                 for k in range(13):
                     cpu.r[k] = regs[k]
-                cpu.r[13], cpu.r[14] = MB + MS - 0x100, RET  # the same stack and return address as Unicorn's
+                cpu.r[13], cpu.r[14] = sp, RET  # the same stack and return address as Unicorn's
                 cpu.n, cpu.z, cpu.c, cpu.v = (flags >> 3) & 1, (flags >> 2) & 1, (flags >> 1) & 1, flags & 1
                 for k in range(32):
                     cpu.s[k] = fregs[k]
@@ -558,7 +567,7 @@ def main():
                 uc.reg_write(UC_ARM_REG_CPSR, 0x10 | (flags << 28))  # first: a mode change banks sp and lr
                 for k in range(13):
                     uc.reg_write(REGS[k], regs[k])
-                uc.reg_write(UC_ARM_REG_SP, MB + MS - 0x100)
+                uc.reg_write(UC_ARM_REG_SP, sp)
                 uc.reg_write(UC_ARM_REG_LR, RET)
                 uc.reg_write(UC_ARM_REG_FPEXC, 0x40000000)  # VFP on
                 uc.reg_write(UC_ARM_REG_C13_C0_3, TLS)
@@ -625,6 +634,9 @@ def main():
                 mismatched.append((s, bad))
             elif valid == 0:
                 untested.append((s, dict(rejected)))
+            if replay and s == a.only:
+                sys.stderr.write("replay of %08X: %s\n" % (s, "mismatch: " + bad if bad else "no valid trial" if valid == 0
+                                                             else "matched (%d valid trials)" % valid))
             else:
                 matched += 1
                 thumb_matched += s in thumb

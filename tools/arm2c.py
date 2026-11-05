@@ -74,7 +74,8 @@ void call_indirect(Cpu* c, uint32_t t, uint32_t ret);
 extern __thread uint32_t hos_fn_stack[8192];
 extern __thread int hos_fn_depth;
 void hos_gpu_trace_call(uint32_t to);
-#define HOS_FN_IN(a) do { hos_gpu_trace_call(a); if (hos_fn_depth < 8192) hos_fn_stack[hos_fn_depth] = (a); hos_fn_depth++; } while (0)
+void hos_capture(const void* cpu, uint32_t to); /* $HOS_CAPTURE: a function's real inputs, for the matching (GpuTrace.c) */
+#define HOS_FN_IN(a) do { hos_gpu_trace_call(a); hos_capture(c, a); if (hos_fn_depth < 8192) hos_fn_stack[hos_fn_depth] = (a); hos_fn_depth++; } while (0)
 #define HOS_FN_OUT() (hos_fn_depth--)
 #else
 #define HOS_FN_IN(a) ((void)0)

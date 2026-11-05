@@ -107,6 +107,70 @@ static struct { uint32_t from, to; unsigned long long count; } edges[EDGES];
 
 static int max_depth;
 
+/* $HOS_CAPTURE (addresses in hex, commas) and $HOS_CAPTURE_DIR: at a listed function's first entry, its registers
+   (<dir>/<address>/regs.txt: r0-r15, N Z C V, s0-s31, FPSCR, the thread pointer, one hex value a line) and the game's
+   memory as it stands (code.bin, heap.bin, linear.bin, stack.bin: the regions and sizes of the RAM dumps that
+   tools/match_functions.py --ram reads), so that the matching can run the function on what the game really gave it
+   (--replay) instead of random inputs alone */
+#include "Cpu.h"
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+static uint32_t capture_at[64];
+static int captures = -1, captured[64];
+
+void hos_capture(const void* cpu, uint32_t to)
+{
+    if (captures == 0)
+        return;
+    if (captures < 0) {
+        captures = 0;
+        const char* list = getenv("HOS_CAPTURE");
+        for (const char* p = list; p && *p && captures < 64;) {
+            capture_at[captures++] = (uint32_t)strtoul(p, (char**)&p, 16);
+            if (*p == ',')
+                p++;
+        }
+        if (!captures)
+            return;
+    }
+    for (int i = 0; i < captures; i++) {
+        if (capture_at[i] != to || captured[i])
+            continue;
+        captured[i] = 1;
+        const Cpu* c = cpu;
+        char dir[512], path[600];
+        snprintf(dir, sizeof dir, "%s/%08X", getenv("HOS_CAPTURE_DIR") ? getenv("HOS_CAPTURE_DIR") : ".", to);
+        mkdir(dir, 0755);
+        snprintf(path, sizeof path, "%s/regs.txt", dir);
+        FILE* f = fopen(path, "w");
+        if (!f)
+            return;
+        for (int k = 0; k < 16; k++)
+            fprintf(f, "%08X\n", c->r[k]);
+        fprintf(f, "%X\n%X\n%X\n%X\n", c->n, c->z, c->c, c->v);
+        for (int k = 0; k < 32; k++)
+            fprintf(f, "%08X\n", c->s[k]);
+        fprintf(f, "%08X\n%08X\n", c->fpscr, c->tls);
+        fclose(f);
+        static const struct { const char* name; uint32_t at, size; } regions[] = {
+            {"code.bin", 0x00100000u, 0x00700000u}, {"heap.bin", 0x08000000u, 0x06000000u},
+            {"linear.bin", 0x14000000u, 0x02B48000u}, {"stack.bin", 0x0FF00000u, 0x00100000u}};
+        for (int r = 0; r < 4; r++) {
+            snprintf(path, sizeof path, "%s/%s", dir, regions[r].name);
+            /* page by page: a page the game has not mapped reads as zeros (write() refuses it, EFAULT, no fault) */
+            int m = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            static const uint8_t zeros[4096];
+            for (uint32_t o = 0; m >= 0 && o < regions[r].size; o += 4096)
+                if (write(m, hos_memory + regions[r].at + o, 4096) != 4096)
+                    (void)!write(m, zeros, 4096);
+            if (m >= 0)
+                close(m);
+        }
+        fprintf(stderr, "[capture] %08X: registers and memory in %s\n", to, dir);
+    }
+}
+
 void hos_gpu_trace_call(uint32_t to)
 {
     if (hos_fn_depth > max_depth)
