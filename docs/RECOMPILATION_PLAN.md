@@ -357,6 +357,18 @@ Performance comes first in every design choice, the more so for the seamless co-
    0x03000000): Omega Ruby .code 26,177 translated, 19,965 matched, **0 mismatched**; X .code 25,422, 19,061, **0**;
    Omega Ruby linked modules 42,169, 25,531, **0**; X's 38,684, 22,913, **0**. Not checked: the functions with no valid
    trial (6,212, 6,361, 16,638, 15,771), mostly ones random inputs never run to the end (inferred, not measured).
+   **The functions with no valid trial, measured and reduced (5 November).** `match_functions.py --untested` writes
+   why each one's trials were rejected; then fixed in the test, not the translation (the test was stricter than the
+   3DS): unaligned word and halfword accesses allowed (the ARM11 runs with them on, as the runtime's ld32 does); data
+   mapped non-executable, a call into data (a pointer read from random memory) returning at once on both sides when
+   lr is the C's return; every other trial made of pointers; registers may hold heap addresses the game itself points
+   to. Then a second pass (`--retest`) of the functions still without one over a RAM dump taken in a battle (the
+   owner's saves, 5 November: Omega Ruby's first battle after choosing the starter, X's rival battle down the route;
+   Pomegrade's headless Azahar, `draw off` and `until log:DllBattle`). Matched, **0 mismatched** throughout:
+   Omega Ruby .code 19,965 → 22,066; X .code 19,061 → 21,459; Omega Ruby linked modules 25,531 → 28,641; X's 22,913 →
+   25,913. Still without a valid trial: 4,118, 3,971, 13,402, 12,652; the main reason a null pointer's field (2,980
+   in Omega Ruby's .code: objects absent from both dumps, or pointers built from random words), then loops past the
+   step cap, alignment-needing instructions (ldm, ldrd) on random addresses, addresses outside the test's memory.
    Step 3: `src/hos/` (kernel, threads, loader, IPC, srv, APT, ndm, cfg, ptm, frd, boss, fs (RomFS), hid, gsp with a
    null GPU) runs Omega Ruby's translated code natively (`game <extracted dir> <.3ds>`) to its **first GPU command list**
    (29,824 bytes submitted); its main thread's first 388 system calls equal Azahar's, in order
