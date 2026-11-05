@@ -370,3 +370,12 @@ Performance comes first in every design choice, the more so for the seamless co-
    builds commands from registers or tables (not pool words), the modules' part, and X. Inferred, to check: the models'
    files (BCH) hold their materials and meshes as ready-made command lists, which the reimplemented library would turn
    into Vulkan state once, when a model loads, not in every frame.
+   **5 November, the GPU trace** (`build_game.py --gpu-trace`, src/hos/GpuTrace.c: each word of every command list the
+   game submits credited to the function that stored it, with its three callers): Omega Ruby now boots to its title
+   modules (DllSequence, DllBackGround, DllFieldDemo, DllTitle, as in Azahar) and submits about 300 command lists a
+   second (35,840 in 120 s, never stopping; dsp::DSP silent, the system archives, ldr:ro, the save data done for it).
+   92.8 % of the words are written by one function, 0x144D28, a memcpy (ldm / stm by 32 bytes), called from
+   0x337F6C (41.7 %), 0x300B28 (27.7 %), 0x32430C (10.4 %), 0x3388F0 (5.9 %): the command lists are mostly copied
+   from ready-made buffers, which supports the inference above (the models' files hold them). The callers sit in
+   0x300000-0x33A000, beside Pomegrade's `Gfx_BuildCommandList` (0x33899C): the library's core. Next: the trace
+   to look through the copies (credit the source buffer, not memcpy), and the same on X.
