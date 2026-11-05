@@ -28,15 +28,19 @@ typedef struct {
 
 extern uint8_t* hos_memory;
 
-static inline uint32_t ld32(Cpu* c, uint32_t a) { uint32_t v; (void)c; memcpy(&v, hos_memory + a, 4); return v; }
-static inline uint32_t ld16(Cpu* c, uint32_t a) { uint16_t v; (void)c; memcpy(&v, hos_memory + a, 2); return v; }
-static inline uint32_t ld8(Cpu* c, uint32_t a) { (void)c; return hos_memory[a]; }
 #ifdef HOS_GPU_TRACE
-void hos_gpu_trace_store(uint32_t a); /* (GpuTrace.c: the store's writer recorded, in the linear heap) */
+void hos_gpu_trace_store(uint32_t a); /* (GpuTrace.c: the stored word's origin recorded, in the heaps) */
+void hos_gpu_trace_load(uint32_t a);  /* (GpuTrace.c: a copy function's source) */
 #define HOS_STORE_SEEN(a) hos_gpu_trace_store(a)
+#define HOS_LOAD_SEEN(a) hos_gpu_trace_load(a)
 #else
 #define HOS_STORE_SEEN(a) ((void)0)
+#define HOS_LOAD_SEEN(a) ((void)0)
 #endif
+static inline uint32_t ld32(Cpu* c, uint32_t a) { uint32_t v; (void)c; HOS_LOAD_SEEN(a); memcpy(&v, hos_memory + a, 4); return v; }
+static inline uint32_t ld16(Cpu* c, uint32_t a) { uint16_t v; (void)c; HOS_LOAD_SEEN(a); memcpy(&v, hos_memory + a, 2); return v; }
+static inline uint32_t ld8(Cpu* c, uint32_t a) { (void)c; HOS_LOAD_SEEN(a); return hos_memory[a]; }
+
 static inline void st32(Cpu* c, uint32_t a, uint32_t v) { (void)c; HOS_STORE_SEEN(a); memcpy(hos_memory + a, &v, 4); }
 static inline void st16(Cpu* c, uint32_t a, uint32_t v) { uint16_t h = (uint16_t)v; (void)c; HOS_STORE_SEEN(a); memcpy(hos_memory + a, &h, 2); }
 static inline void st8(Cpu* c, uint32_t a, uint32_t v) { (void)c; HOS_STORE_SEEN(a); hos_memory[a] = (uint8_t)v; }

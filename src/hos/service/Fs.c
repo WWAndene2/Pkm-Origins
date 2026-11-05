@@ -18,6 +18,7 @@
 
 #include "FsHost.h"
 #include "../GameImage.h"
+#include "../GpuTrace.h"
 #include "../Memory.h"
 
 enum { MODULE_FS = 17, SUMMARY_NOT_FOUND = 4, SUMMARY_WRONG_ARGUMENT = 8, LEVEL_STATUS = 25, LEVEL_PERMANENT = 27 };
@@ -514,6 +515,7 @@ static void file_read(HosRequest* q)
     size_t n = 0;
     if (f->kind == 1) {
         n = hos_romfs_read(offset, hos_pointer(address), length);
+        hos_gpu_trace_file(address, (uint32_t)n, offset);
     } else if (f->kind == 3) {
         if (!(f->mode & 1)) { /* (Azahar's DiskFile: no read flag) */
             hos_reply(q, 2, 2);
