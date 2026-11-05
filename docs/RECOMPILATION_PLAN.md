@@ -386,3 +386,9 @@ Performance comes first in every design choice, the more so for the seamless co-
    9.6 % written or copied); 16.6 % are copied by 0x1499BC from the data at 0x5A4F4C-0x5B0B48 (templates). So the
    inference above holds only in part at the title: most of the lists are built by code each frame, the models' data
    among the inputs. Not yet looked at: which file the RomFS offset is, what 0x1499BC and 0x14AFA8 draw.
+   **X the same way** (5 November; a new save: the owner's X save has no format file): it boots and submits command
+   lists without stopping (34,816 in 120 s). Its trace (memcpy 0x144F34, 0x300EF8): 72.5 % written, 24.8 % copied,
+   2.8 % from a RomFS file (0x3C4 bytes again); the top writers are the same functions as Omega Ruby's, at X's
+   addresses and byte-identical (symbols/shared_functions.tsv): `Gfx_BuildCommandList` (X 0x323420, 33.4 %),
+   `Gfx_FlushLightAndMatrixCommands` (0x323C00, 17.2 %), 0x14B984 (Omega Ruby's 0x14AFA8). One graphics library for
+   both games, as step 4 hoped: reimplemented once.
