@@ -265,6 +265,7 @@ static const HosCommandEntry commands[] = {
     {0x001B, initialize_with_version, "InitializeWithVersion"},
     {0x001D, begin_hosting_network, "BeginHostingNetwork"},
     {0x0021, ok, "SetProbeResponseParam"}, /* (Azahar has none: it answers success, ReportUnimplementedFunction) */
+    {0x0023, ok, "(unnamed)"},              /* (not in Azahar's table: the same success) */
     {0, NULL, NULL},
 };
 

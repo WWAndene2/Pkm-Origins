@@ -435,6 +435,14 @@ Performance comes first in every design choice, the more so for the seamless co-
    `Gfx_BuildCommandList`), once; 0x323C8C draws a node that has a 2D layout part (+0xD8, +0xDC) through 0x337F6C.
    Still to read for the renderer's interface: `Gfx_BuildCommandList`'s inputs field by field (306 lines), the
    material record (+0x104), and how a BCH's meshes, materials and shaders become these nodes when a model loads.
+   **The field** (5 November, Omega Ruby from the owner's save, buttons scripted: HOS_INPUT): DllField loaded, about 5
+   command lists a frame without stopping (51,729 in 3 minutes). Its lists come from the same functions as the
+   title's, in about the same shares: copies of the program's templates (0x300B28, 27.5 %: vertex layouts, shader
+   setup), the shader binary from the RomFS (13.8 %), per-frame uniforms by 0x144CA8, 0x32403C, 0x4BE1E0, 0x4BCD14,
+   0x15EB38 (27 %: the matrices of every drawn object), textures by 0x323D98, draws by 0x32430C, and the materials'
+   buffers built once by `Gfx_BuildCommandList`. So 0x4BE1E0 / 0x32430C are the general draw path, not sprites only:
+   each object's matrices sent every frame, its prebuilt buffer resubmitted. New on the field: 0x19B76C and 0x19B6E8
+   set geometry shader registers (to read: the PICA200's geometry shader has no Mali equivalent, §8.1).
    `Gfx_BuildCommandList` (first reading): its list is a record (render state + 0x44) holding the command buffer
    (+0x10, words used +0x1C), a count of draw items (+4, +6) and the items at +0x28, 0x2C bytes each, each pointing
    (+0x28) at a draw record: its key (+8: the items sharing it are drawn together, the light and matrix commands
