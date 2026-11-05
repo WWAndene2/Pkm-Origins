@@ -701,7 +701,9 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         # (the cases: every instruction translated, filled in once the function is: code past its last return, which
         # only such a jump could reach, is not decoded, as data may follow; a jump there is a tail call through
         # call_indirect, which faults (4) when nothing is translated there)
-        return ("{ uint32_t t = %s; switch (t - %s) { @CASES@ default: break; } call_indirect(c, t, ret); return; }" % (expr, ADDR(0)))
+        # (one switch a function, at its end, which every computed jump reaches by goto: a switch at each jump made
+        # Omega Ruby's C several times larger, 5 November)
+        return "{ jt = %s; goto DISPATCH; }" % expr
     body, targets, returned = [], set(), False
     unsupported = []  # the instructions with no C (a stop each)
     for k_, i in enumerate(insns):
@@ -754,8 +756,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                   and prev.operands[1].mem.index != 0):
                 # ldr rN, [rA, rB, lsl #2]; bx rN: a jump through a table of addresses, into this function as a rule
                 # (a threaded interpreter: the Pawn scripts' AMX at Omega Ruby's 00503DAC), a switch like the others
-                line.append(jump("c->r[%d]" % rd()).replace("call_indirect(c, t, ret)",
-                                                            "if (t == ret) return; call_indirect(c, t, ret)", 1))
+                line.append(jump("c->r[%d]" % rd()).replace("goto DISPATCH", "if (jt == ret) return; goto DISPATCH", 1))
             elif base_m == "bx" and ops[0].type == ARM_OP_REG:  # a jump through a register: the function it lands in returns
                 # for this one; to the address this function returns to, it is the return itself (lr popped into
                 # another register: pop {r3}; bx r3, Omega Ruby's 001028A6)
@@ -1147,10 +1148,13 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
     # pointers can loop without end on a test's random values: past 2,000 the trial stops on fault 2, as a long loop
     # does, instead of overflowing the C's stack)
     out = ["static void %s_body(Cpu* c, uint32_t ret)\n{\n    (void)ret;" % name]
+    dispatch = None
     if computed:
+        out.append("    uint32_t jt;")
         done = sorted({a for a, _ in body if a < end_code})
         cases = " ".join("case 0x%Xu: goto L%X;" % (x, x) for x in done)
-        body = [(a, s.replace("@CASES@", cases)) for a, s in body]
+        dispatch = ("DISPATCH: switch (jt - %s) { %s default: break; } call_indirect(c, jt, ret); return;"
+                    % (ADDR(0), cases))
         targets.update(done)
     # (a return-address fault records where it happened: r15 the instruction's address)
     body = [(a, s.replace("c->fault = 3;", "c->r[15] = %s; c->fault = 3;" % ADDR(a))) for a, s in body]
@@ -1165,6 +1169,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
     for t in sorted(targets - labelled):
         out.append("L%X: c->r[15] = %s; c->fault = 10; return; /* UNSUPPORTED: a branch to no translated code */"
                    % (t, ADDR(t)))
+    if dispatch:
+        out.append(dispatch)
     out.append("}")
     out.append("void %s(Cpu* c, uint32_t ret)\n{\n    HOS_ENTER(c);\n    HOS_FN_IN(%s);\n    %s_body(c, ret);\n"
                "    HOS_FN_OUT();\n    HOS_LEAVE(c);\n}\n" % (name, ADDR(start), name))
