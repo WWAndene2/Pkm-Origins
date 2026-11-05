@@ -457,3 +457,102 @@ Performance comes first in every design choice, the more so for the seamless co-
    values another), and a virtual at +4 then + 100 giving one more register value; command templates are copied from
    the program's data (0x338D84...: 0x60, 0x30 and 0x10 bytes). Each item's own word at +0x38 is compared byte-swapped
    with the last (a sort key). Still to read: the rest of its loop, the draw record in full, and what fills the items.
+
+## 11. The renderer's architecture (step 4; owner's request, 5 November: a design to discuss, nothing built)
+
+Goals (owner's): native rendering, no translation of the 3DS's GPU commands (§3, step 4); every PC and phone, Windows,
+Linux, Android on Adreno and above all Mali; every quality setting up with no stutter and no added latency. Built on
+the map of §10 (Omega Ruby's title and field, X's title: one graphics library for both games). Marks: **seen** (traced
+or read in the code), **inferred**, **to read** (not yet looked at).
+
+### 11.1 Where the game meets the renderer
+
+The game's own code stays translated C (steps 2-3). Its graphics library is the layer replaced: the functions that
+today write PICA200 command words are given our C, which calls the renderer instead, with the same arguments and
+results so the rest of the game cannot tell (each replacement listed in `symbols/`, its original kept for matching).
+
+| The library's part | What it does (seen) | Replaced by |
+|---|---|---|
+| `Gfx_BuildCommandList` 0x33899C (and `Gfx_UpdateDrawState` 0x326FA8 above it), once per scene or when a node changes | builds a material's command buffer: its uniforms, textures, vertex layout, from the node's material record (+0x104) and state block | building that material's Vulkan objects (pipeline key, descriptor set, constant buffer) once, kept with the node |
+| template copies by 0x300B28 / 0x1499BC, the shader upload from the RomFS | vertex layouts and the vertex shader's program, as data | read from the same data when a material is built: no copy, no upload |
+| 0x4BE1E0, 0x144CA8, 0x32403C, 0x4BCD14, 0x15EB38 each frame | each drawn object's matrices into the uniform staging (and mirrored to the geometry unit) | the matrices into the frame's uniform ring buffer |
+| 0x323D98, 0x323810 each frame | textures and combiner state changes between draws | a descriptor set or pipeline change, only when different |
+| 0x32430C (flushes a batch), 0x323C8C / 0x4BE5D0 (a mesh node's draw) each frame | uniforms then one draw (count x 6 indices for a batch) | `vkCmdDrawIndexed`, instanced for a batch |
+| 0x13EA34, 0x123888 each frame | viewport, framebuffer, blending | the render pass and its dynamic state |
+| GSP's command queue, display transfers, VBlank (src/hos/service/Gsp.c) | submit lists, copy the frame to the screen | the frame's submission and presentation (swapchain) |
+
+To read before the first line of renderer code: the material record and state block field by field, the mesh node in
+full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResourceSetup` 0x31FC24,
+`Gfx_CreateModelInstance` 0x39A084 and around), and the one geometry shader user (0x184020).
+
+### 11.2 Resources, made once
+
+- **Vertex and index buffers**: the game's own, in its linear heap (seen: the command lists point there). Uploaded to
+  the GPU once when a material that uses them is built, tracked by address and the heap's allocation, re-uploaded
+  only if the game writes them again (a per-page dirty bit from the runtime's memory, as the GPU trace already does).
+- **Textures**: the 3DS's formats (tiled RGBA, ETC1/ETC1A4, L8/A8...: Pomegrade's PicaTexture.cpp decodes them) decoded
+  once at load into a GPU image, optionally recompressed: ASTC on phones (Mali, Adreno: native), BC7 on PC; replacement
+  packs (§7) loaded in their place. Never decoded per frame.
+- **Vertex shaders**: the PICA200 shader programs (the RomFS file seen at 0x5B71C0F0, and those in the models' BCH)
+  translated to SPIR-V by a tool of ours, as the ARM code is to C: once, when the game is installed (or first run),
+  cached; each translation checked against a PICA200 shader interpreter on random inputs (the matching of §4, for
+  shaders).
+- **Fragment stage**: the 3DS has no fragment shader, but fixed stages (6 texture combiners, fragment lighting with its
+  lookup tables, fog, alpha test, blending). Each material's combination is a key; a SPIR-V fragment shader is
+  generated per key, with specialization constants for the rest. All keys of the game's models are known ahead (the
+  BCH files are read at install): every pipeline is built before play and kept in the pipeline cache. A key never
+  seen (should one appear) uses a general shader at once and its own pipeline from the next frames (built on a worker
+  thread): never a stall.
+
+### 11.3 A frame
+
+- The game's frame (its scene walk 0x152888 and draw path) records draws into the renderer's frame list: no Vulkan
+  call on the game's thread except appending (cheap, lock-free).
+- A render thread turns the frame list into command buffers: one render pass a screen (top 400x240, bottom 320x240,
+  each at the chosen internal resolution), draws sorted by pipeline then descriptor set, uniforms in one ring buffer
+  with dynamic offsets, descriptor sets cached. One frame in flight ahead of the GPU, no more (latency).
+- The two screens composed into the window or phone screen by the layout chosen (the app's), in the last pass, which
+  also does the upscaling (FSR 1) and post-effects.
+- Presentation: FIFO with three images on phones through Android's frame pacing (Swappy), mailbox or VRR on PC;
+  pre-rotation on Android (§8.1).
+
+### 11.4 Every GPU (§8.1 applied)
+
+- **Tilers (Mali, Adreno binned, PowerVR)**: each screen's pass clears or loads nothing it need not, depth and MSAA
+  images transient and lazily allocated, MSAA resolved in the pass, effects that read the frame as subpasses, narrow
+  barriers, no readback in a frame, AFBC kept on Mali (no storage usage on render targets).
+- **Mali**: no geometry shader (the one user, 0x184020, rewritten as vertex expansion or compute), 16-bit varyings
+  where exact, static descriptor sets, at most 128 bytes of push constants, the vertex count far below the 180 MB
+  limit (inferred: the 3DS's scenes are small).
+- **Adreno**: one depth direction per pass, opaque before transparent (LRZ).
+- **PC (NVIDIA, AMD, Intel)**: the same renderer; the tile rules cost nothing there.
+- **API**: Vulkan 1.1 as the floor (Android 10+, every phone the app targets), 1.2/1.3 features used when present
+  (dynamic rendering, timeline semaphores). MoltenVK for Apple later.
+
+### 11.5 Quality, all optional, the faithful look the default (CLAUDE.md §2)
+
+Internal resolution (1x to the screen's), MSAA 2x/4x, anisotropic filtering, texture packs, FSR 1 upscaling;
+later, on matched code: widescreen, 60 fps (interpolation), better shadows and effects.
+
+### 11.6 Proving it right
+
+- Shaders: translated vertex shaders matched against the interpreter (above).
+- Frames: our frame against Azahar's on the same scene (the owner's save, the same scripted inputs, HOS_INPUT), image
+  by image at 1x: a difference beyond Azahar's own approximations is a defect. A headless mode renders frames to PNG
+  for this, in the container, with no phone.
+
+### 11.7 Milestones
+
+1. The reads of 11.1 done; the replaced functions named in `symbols/`.
+2. Headless, PC: the title's first frame rendered to PNG, compared with Azahar's.
+3. A window on PC (Windows, Linux): the title and the field moving, with the scripted inputs, then real input (step 5).
+4. Android: the app building and running it on the owner's 13T; the timings of §8.1 measured there (frame time, heat
+   over 30 minutes, pipelines built in play: none).
+5. X the same way (the same library).
+
+### 11.8 For the owner to decide
+
+1. The replaced level: the library's functions (11.1, recommended: what the owner chose on 5 November), or one level
+   higher (the scene's nodes), which saves more work each frame but means decompiling more of the engine first.
+2. Texture recompression on phones (ASTC, smaller and faster) or the 3DS's textures decoded as is (exact).
+3. Where the shader translation runs: when installing (a wait once, recommended) or in the background while playing.
