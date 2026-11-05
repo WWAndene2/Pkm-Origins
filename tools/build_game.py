@@ -79,16 +79,16 @@ def main():
             mf, md, mw, mr, me = translate_program.translate_program(
                 m.data, 0, ms, msize, mt, frozenset(m.relocated), m.name, a.jobs)
             mt |= me
-            # a call outside the module's file (data read as code: no module function is there) cannot be one: the
-            # function making it stays a stub, and so, in turn, does any calling it
-            n = len(m.data)
+            # a branch before the module's file (data read as code, as a string after a function's last branch:
+            # DllField's 00031FC0) has no C name: the function making it stays a stub, and so, in turn, does any
+            # calling it; one past the file's end becomes a stub like any untranslated target (never reached)
             while True:
-                drop = [o for o in mf if any(not 0 <= t < n or (t not in mf and t not in ms) for t in md[o])]
+                drop = [o for o in mf if any(t < 0 for t in md[o])]
                 if not drop:
                     break
                 for o in drop:
                     del mf[o]
-                    reasons["(module) calls outside its file"] = reasons.get("(module) calls outside its file", 0) + 1
+                    reasons["(module) branches before its file"] = reasons.get("(module) branches before its file", 0) + 1
             mwanted = set(ms) | {t for o, d in md.items() if o in mf for t in d}
             mstubs = sorted(t for t in mwanted if t not in mf)
             for k, v in mr.items():

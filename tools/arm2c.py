@@ -647,8 +647,11 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 t = pc_of(a) + (h & 0xFF) * 4
                 if start <= t < end:
                     data.update((t, t + 2))
+    # a module's words the loader rewrites are data, never code (no branch relocation in either game's modules:
+    # Cro.c): the address tables in DllField's 00031D30, read as code, gave branches far past the file
+    fixed_data = {a for a in range(start, end, 4) if a in relocated} if module else set()
     for _ in range(0 if thumb else 16):
-        new, sw = set(), {}
+        new, sw = set(fixed_data), {}
         for a in range(start, end, 4):
             if a in data:
                 continue
