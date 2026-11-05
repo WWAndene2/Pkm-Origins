@@ -8,6 +8,8 @@
 #include "../hos/Memory.h"
 #include "PicaFragment.h"
 #include "PicaRegs.h"
+#include "PicaVertex.h"
+#include <math.h>
 
 extern uint8_t* hos_memory;
 
@@ -30,7 +32,7 @@ static const uint32_t* physical(uint32_t address, uint32_t bytes, void* user)
 /* the census: each feature's values and how many draws use each */
 enum { KEYS = 4096 };
 static struct { char key[96]; unsigned long long draws; } census[KEYS];
-static unsigned long long draws;
+static unsigned long long draws, triangles, finite_vertices, inside_vertices, all_vertices;
 
 static void count(const char* fmt, ...)
     __attribute__((format(printf, 1, 2)));
@@ -85,6 +87,25 @@ static void on_draw(PicaState* s, int indexed, void* user)
 {
     (void)user;
     save_fragment(s);
+    static PicaVertex verts[1 << 16];
+    const long n = pica_vertex_draw(s, indexed, verts, 1 << 16);
+    if (n < 0)
+        count("vertices: memory not reachable");
+    else {
+        long finite = 0, inside = 0;
+        for (long k = 0; k < n; k++) {
+            const float* p = verts[k].position;
+            if (isfinite(p[0]) && isfinite(p[1]) && isfinite(p[2]) && isfinite(p[3]) && p[3] != 0) {
+                finite++;
+                if (fabsf(p[0] / p[3]) <= 1.01f && fabsf(p[1] / p[3]) <= 1.01f)
+                    inside++;
+            }
+        }
+        triangles += n / 3;
+        finite_vertices += finite;
+        inside_vertices += inside;
+        all_vertices += n;
+    }
     const uint32_t* r = s->reg;
     draws++;
     static const char* topology[] = {"triangles", "strip", "fan", "geometry shader"};
@@ -133,7 +154,8 @@ void renderer_report(void)
 {
     if (!stats)
         return;
-    fprintf(stats, "# draws %llu\n# feature\tdraws\n", draws);
+    fprintf(stats, "# draws %llu, triangles %llu; vertices %llu, of them finite %llu, inside the screen %llu\n"
+                   "# feature\tdraws\n", draws, triangles, all_vertices, finite_vertices, inside_vertices);
     for (int k = 0; k < KEYS && census[k].key[0]; k++)
         fprintf(stats, "%s\t%llu\n", census[k].key, census[k].draws);
     fclose(stats);

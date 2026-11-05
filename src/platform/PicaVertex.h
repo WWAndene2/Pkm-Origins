@@ -1,0 +1,27 @@
+/* A draw's vertices, as the PICA200 makes them (docs/RECOMPILATION_PLAN.md §11, the first frames, option B): the
+ * attributes read from the game's memory by the twelve loaders (0x200-0x227: formats, offsets, strides, the index
+ * buffer), the vertex shader run on each (the interpreter, PicaShader.c: exact; the translated SPIR-V, checked equal to
+ * it, comes with the GPU vertex path), its outputs placed by their semantics (0x04F-0x056), the triangles assembled
+ * (lists, strips, fans: Azahar's PrimitiveAssembler, its winding kept). As Azahar's LoadVertices and
+ * RasterizerAccelerated::AddTriangle: a 64-entry vertex cache for indexed draws (same results), each triangle's
+ * second and third quaternions negated when opposite to the first's.
+ *
+ * Not yet: the geometry shader (none on the title), vertex retention (Azahar has none either). */
+#ifndef PICA_VERTEX_H
+#define PICA_VERTEX_H
+
+#include <stdint.h>
+
+#include "PicaRegs.h"
+
+/* one rasterizer vertex, Azahar's HardwareVertex: position, color, texcoord0, texcoord1, texcoord2, texcoord0_w,
+   normquat, view (22 floats) */
+typedef struct {
+    float position[4], color[4], texcoord0[2], texcoord1[2], texcoord2[2], texcoord0_w, normquat[4], view[3];
+} PicaVertex;
+
+/* the draw's triangles (3 vertices each) into out (at most max vertices); the count of vertices written, or -1 when
+   the memory the draw reads is not reachable */
+long pica_vertex_draw(PicaState* state, int indexed, PicaVertex* out, long max);
+
+#endif
