@@ -427,3 +427,11 @@ Performance comes first in every design choice, the more so for the seamless co-
    So at the title the per-frame work is a scene walk, prebuilt mesh buffers resubmitted, and batched sprites. For
    Vulkan: a mesh node's buffer becomes a pipeline and descriptor set made when it is built; a sprite batch, one
    instanced draw with its matrices in a uniform (or storage) buffer.
+   The models are BCH files (Nintendo's H3D format: version 0x21 in Omega Ruby, 0x07 in X; the runtime model class
+   `xy_system::H3dShaderModel` in both, Pomegrade's ORAS_ENGINE.md), and Pomegrade already reads them in C++
+   (tools/remake/src/Bch.cpp, BchUpgrade.cpp for X's version, PicaCommands.cpp, PicaTexture.cpp: reused, §5). A mesh
+   node (+0x104: its material, +0xD4 / +0xFA: its state block and count, +0xFE: changed) is built by
+   `Gfx_UpdateDrawState` (a default render state, `Gfx_TextureSetupFromHeader`, the state block applied, then
+   `Gfx_BuildCommandList`), once; 0x323C8C draws a node that has a 2D layout part (+0xD8, +0xDC) through 0x337F6C.
+   Still to read for the renderer's interface: `Gfx_BuildCommandList`'s inputs field by field (306 lines), the
+   material record (+0x104), and how a BCH's meshes, materials and shaders become these nodes when a model loads.
