@@ -14,6 +14,7 @@ repository: it holds the game's literal constants). Needs capstone, unicorn and 
 Unicorn stands in for Azahar here (same ARM instructions, no 3DS system); whole-game checks use Azahar (§4).
 """
 import argparse
+import collections
 import json
 import mmap
 import ctypes
@@ -26,7 +27,8 @@ import time
 import subprocess
 import tempfile
 
-from unicorn import UC_ARCH_ARM, UC_HOOK_INTR, UC_HOOK_MEM_WRITE, UC_MODE_ARM, Uc, UcError
+from unicorn import (UC_ARCH_ARM, UC_ERR_FETCH_PROT, UC_ERR_FETCH_UNMAPPED, UC_HOOK_INTR, UC_HOOK_MEM_WRITE, UC_MODE_ARM,
+                     UC_PROT_READ, UC_PROT_WRITE, Uc, UcError)
 from unicorn.arm_const import (UC_ARM_REG_CPSR, UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
                                UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_R8,
                                UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12, UC_ARM_REG_SP,
@@ -70,11 +72,12 @@ typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps;
    old byte) so that a trial can be compared on what it wrote and undone after */
 extern uint8_t* RP[8]; extern uint32_t RB[8], RS[8]; extern int NR;
 extern uint32_t* LA; extern uint8_t* LV; extern int NL, LMAX;
-extern uint32_t RO_LO[16], RO_HI[16]; extern int NRO; /* read-only on the 3DS (the program's text and read-only data, the modules'
+extern uint32_t RO_LO[16], RO_HI[16]; extern int NRO; extern uint32_t FAULT_AT; /* the address a fault 1 was on */ /* read-only on the 3DS (the program's text and read-only data, the modules'
    code): a write faults (7) */
 static uint8_t* at(Cpu* c, uint32_t a, uint32_t n, int w)
 {
-    if (a % n) { c->fault = 1; return 0; }
+    /* (an unaligned word or halfword access is the ARM11's, as the 3DS runs it with unaligned access on, and the
+       runtime's (Cpu.h: memcpy); the instructions that need alignment, ldrd / strd / ldm / stm, check it themselves) */
     if (w)
         for (int k = 0; k < NRO; k++)
             if (a + n > RO_LO[k] && a < RO_HI[k]) { c->fault = 7; return 0; }
@@ -89,6 +92,7 @@ static uint8_t* at(Cpu* c, uint32_t a, uint32_t n, int w)
             return p;
         }
     c->fault = 1;
+    FAULT_AT = a;
     return 0;
 }
 static uint32_t ld32(Cpu* c, uint32_t a) { uint32_t v = 0; uint8_t* p = at(c, a, 4, 0); if (p) memcpy(&v, p, 4); return v; }
@@ -102,7 +106,8 @@ static void st8(Cpu* c, uint32_t a, uint32_t v) { uint8_t* p = at(c, a, 1, 1); i
 MAIN = r"""
 uint8_t* RP[8]; uint32_t RB[8], RS[8]; int NR;
 uint32_t* LA; uint8_t* LV; int NL, LMAX;
-uint32_t RO_LO[16], RO_HI[16]; int NRO;
+uint32_t RO_LO[16], RO_HI[16]; int NRO; uint32_t FAULT_AT;
+uint32_t fault_at(void) { uint32_t x = FAULT_AT; FAULT_AT = 0; return x; }
 void protect(uint32_t lo, uint32_t hi) { if (NRO < 16) { RO_LO[NRO] = lo; RO_HI[NRO] = hi; NRO++; } }
 void setup(int nr, uint8_t** p, uint32_t* b, uint32_t* s, uint32_t* la, uint8_t* lv, int lmax)
 { NR = nr; for (int i = 0; i < nr; i++) { RP[i] = p[i]; RB[i] = b[i]; RS[i] = s[i]; } LA = la; LV = lv; LMAX = lmax; }
@@ -118,6 +123,10 @@ void hos_svc(Cpu* c, uint32_t n)
     for (int k = 0; k < 8; k++) { h ^= c->r[k]; h *= 0x85EBCA6Bu; h ^= h >> 13; }
     for (int k = 0; k < 4; k++) { c->r[k] = h; h *= 0xC2B2AE35u; h ^= h >> 16; }
 }
+/* the regions code can run from (call_indirect: a call elsewhere, into data, returns at once, as Unicorn's side does) */
+uint32_t EX_LO[256], EX_SZ[256]; int NEX;
+void executable(int n, uint32_t* lo, uint32_t* sz) { NEX = n; for (int i = 0; i < n; i++) { EX_LO[i] = lo[i]; EX_SZ[i] = sz[i]; } }
+int in_code(uint32_t a) { for (int i = 0; i < NEX; i++) if (a - EX_LO[i] < EX_SZ[i]) return 1; return 0; }
 void undo(void) { while (NL) { NL--; *where(LA[NL]) = LV[NL]; } }
 """
 
@@ -149,6 +158,13 @@ def svc_stand_in(n, r):
     return out
 
 
+# the fault codes the translated C sets (src/hos/Cpu.h, tools/arm2c.py, the harness above)
+FAULTS = {1: "memory: an access outside the test's memory, or misaligned", 2: "too long: the loop or call depth cap",
+          3: "returned elsewhere than its caller", 4: "an indirect call to no translated function",
+          5: "a jump table's index out of its table", 6: "the write log full", 7: "a write to read-only memory",
+          8: "a call that does not return returned", 9: "a function the build could not translate was called", 10: "an unsupported instruction or code reached"}
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("code")
@@ -171,11 +187,14 @@ def main():
                    "was linked (its modules.bin and data.bin given with --map)")
     p.add_argument("--with-code", help="with --module: the .code's function list; the .code (the code argument) is "
                    "translated and compiled beside the module, so the module's calls into it run")
-    p.add_argument("--map", action="append", default=[], help="FILE@ADDRESS: more of the game's memory under the tests")
+    p.add_argument("--map", action="append", default=[], help="FILE@ADDRESS[:data]: more of the game's memory under the tests (:data: "
+                   "not code, as the modules' data segments)")
     p.add_argument("--only", type=lambda v: int(v, 16), help="test this function only (and what it calls)")
     p.add_argument("--exheader", help="the program's exheader: its text and read-only data are made read-only, as on "
                    "the 3DS (a trial writing there is impossible in the game: X's 00507F50 on a random index wrote its "
                    "own code, 4 November)")
+    p.add_argument("--untested", help="write the functions with no valid trial there: address, then why their trials "
+                   "were rejected (the translated C's fault codes, src/hos/Cpu.h and arm2c.py, and how many trials each)")
     p.add_argument("--ram", help="a folder of the game's memory (code.bin, heap.bin, linear.bin, stack.bin) under the tests")
     a = p.parse_args()
     code = open(a.code, "rb").read()
@@ -314,7 +333,7 @@ def main():
         f.write("void run(int i, Cpu* c) { hos_fpscr_mode(c->fpscr); R[i](c, c->r[14]); fesetround(FE_TONEAREST); }\n")
         f.write("void call_indirect(Cpu* c, uint32_t t, uint32_t ret) { int lo = 0, hi = %d;"
                 " while (lo < hi) { int m = (lo + hi) / 2; if (A[m] < t) lo = m + 1; else hi = m; }"
-                " if (lo < %d && A[lo] == t) T[lo](c, ret); else c->fault = 4; }\n" % (len(table), len(table)))
+                " if (lo < %d && A[lo] == t) T[lo](c, ret); else if (in_code(t & ~1u) || c->r[14] != ret) { c->fault = 4; c->r[15] = t; } }\n" % (len(table), len(table)))
     lib = os.path.join(tmp, "functions.so")
     flags = ["-O1", "-fPIC", "-w", "-frounding-math", "-ffp-contract=off"]
     if not compile_all(["cc", "-c"] + flags, srcs, a.jobs):
@@ -339,6 +358,15 @@ def main():
             if prng.random() < 0.5:
                 mem[o:o + 4] = (MB + prng.randrange(0, MS - 0x400, 4)).to_bytes(4, "little")
         pool.append(bytes(mem))
+    # and pools for the trials made of pointers (every other one): 7 words in 8 point into the test memory, so that a
+    # function walking objects (a pointer, a field that is a pointer, its field...) reaches its end inside it
+    dense = []
+    for _ in range(16):
+        mem = bytearray(prng.randbytes(MS))
+        for o in range(0, MS, 4):
+            if prng.random() < 0.875:
+                mem[o:o + 4] = (MB + prng.randrange(0, MS - 0x400, 4)).to_bytes(4, "little")
+        dense.append(bytes(mem))
 
     def check(job, jobs):
         """the trials of every jobs-th function from job: (matched, mismatched, no valid trial)"""
@@ -354,8 +382,12 @@ def main():
         else:
             uc.mem_map(a.base, (len(code) + 0xFFF) & ~0xFFF)
             uc.mem_write(a.base, code)
-        for spec in a.map:  # more of the game's memory: FILE@ADDRESS (the modules' region)
+        data_at = {0x08000000, 0x14000000, 0x0FF00000}  # the heap, linear heap and stack dumps: data, never run
+        for spec in a.map:  # more of the game's memory: FILE@ADDRESS[:data] (the modules' region)
             path, addr = spec.rsplit("@", 1)
+            if addr.endswith(":data"):
+                addr = addr[:-5]
+                data_at.add(int(addr, 16))
             regions.append((int(addr, 16), open(path, "rb").read()))
         if raw:  # --modules all: the modules' files, one region
             blob = bytearray(raw[-1][0] + len(raw[-1][1]) - raw[0][0])
@@ -363,9 +395,39 @@ def main():
                 blob[at_ - raw[0][0]:at_ - raw[0][0] + len(d)] = d
             regions.append((raw[0][0], bytes(blob)))
         cbufs = [ctypes.create_string_buffer(d, len(d)) for _, d in regions]
+        # the data regions are mapped without execute permission: a call into one (a function pointer read from random
+        # data) is stood in for, on both sides, by a function that returns at once to lr (the restart below,
+        # call_indirect in the C), when lr is where the C returns to (a call, or a jump with lr kept); a call into code
+        # that is not a translated function, or a jump with lr changed, stays a fault (4), the trial not counted
+        # code segments, where known: the program's text (exheader 0x10, size 0x18) and each module's code segment;
+        # the rest of their regions (read-only data, data) is data
+        segments = []
+        if a.exheader:
+            ex = open(a.exheader, "rb").read()
+            segments.append((struct.unpack_from("<I", ex, 0x10)[0], struct.unpack_from("<I", ex, 0x18)[0]))
+        for u in units:
+            if u[0]:
+                segments.append((u[1] + u[5].code_start, u[5].code_end - u[5].code_start))
+        executable = []
         for addr, d in regions:
-            uc.mem_map(addr, (len(d) + 0xFFF) & ~0xFFF)
+            size = (len(d) + 0xFFF) & ~0xFFF
+            inside = [(lo, n) for lo, n in segments if addr <= lo < addr + size]
+            if addr in data_at or inside:
+                uc.mem_map(addr, size, UC_PROT_READ | UC_PROT_WRITE)
+                for lo, n in inside:  # (pages: a segment's edges rounded out)
+                    p0, p1 = lo & ~0xFFF, (lo + n + 0xFFF) & ~0xFFF
+                    uc.mem_protect(p0, min(p1, addr + size) - p0)
+                    executable.append((p0, min(p1, addr + size) - p0))
+            else:
+                uc.mem_map(addr, size)
+                executable.append((addr, size))
             uc.mem_write(addr, d)
+        if not a.ram:
+            executable.append((a.base, (len(code) + 0xFFF) & ~0xFFF))
+        if len(executable) > 256:
+            raise SystemExit("more than 8 code regions: raise the C's EX_LO size")
+        so.executable(len(executable), (ctypes.c_uint32 * 256)(*[e[0] for e in executable]),
+                      (ctypes.c_uint32 * 256)(*[e[1] for e in executable]))
         LMAX = 1 << 22
         la, lv = (ctypes.c_uint32 * LMAX)(), (ctypes.c_uint8 * LMAX)()
         n = 1 + len(regions)
@@ -380,6 +442,10 @@ def main():
                 so.protect(u[1] + u[5].code_start, u[1] + u[5].code_end)
         heap_pages = [addr + o for addr, d in regions if addr == 0x08000000 for o in range(0, len(d), 0x1000)
                       if any(d[o:o + 0x1000])]
+        def at_mapped(x):
+            return MB <= x < MB + MS or any(addr <= x < addr + len(d) for addr, d in regions)
+        so.fault_at.restype = ctypes.c_uint32
+        listed = set(starts)  # every function of the list (a --limit run translates some of them only)
         written = set()  # what Unicorn wrote in the game's memory this trial
 
         def on_write(uc_, access, address, size_, value, user):
@@ -391,7 +457,7 @@ def main():
             for addr, d in regions:
                 if addr <= x < addr + len(d):
                     return d[x - addr]
-        uc.mem_map(MB, MS)
+        uc.mem_map(MB, MS, UC_PROT_READ | UC_PROT_WRITE)
 
         def on_svc(uc_, intno, user):  # pc is past the svc: its number is in the instruction there
             pc = uc_.reg_read(UC_ARM_REG_PC)
@@ -408,7 +474,7 @@ def main():
         uc.mem_map(RET, 0x1000)  # the return address holds "b .": Unicorn stops there (until) even when it reaches it mid-block
         uc.mem_write(RET, bytes.fromhex("feffffea") * 1024)
         uc.mem_write(CLREX, bytes.fromhex("1ff07ff5"))
-        matched, mismatched, untested, thumb_matched = 0, [], 0, 0
+        matched, mismatched, untested, thumb_matched = 0, [], [], 0
         for idx, (s, _, _) in enumerate(funcs):
             if idx % jobs != job:
                 continue
@@ -418,14 +484,19 @@ def main():
             rng = random.Random(s)
             struct.pack_into("<I", current, 4 * job, s)
             valid, bad = 0, None
-            for _ in range(a.trials):
+            rejected = collections.Counter()  # why the trials did not count
+            for trial in range(a.trials):
                 # each register: a pointer into the test memory, any value, a small number, or (--ram) an address in the
                 # game's used heap pages, where its objects are
                 choices = [lambda: MB + rng.randrange(0, MS // 2, 4), lambda: rng.getrandbits(32), lambda: rng.randrange(0, 64)]
                 if heap_pages:
                     choices.append(lambda: rng.choice(heap_pages) + rng.randrange(0, 0x1000, 4))
-                regs = [rng.choice(choices)() for _ in range(13)]
-                mem = rng.choice(pool)
+                if trial % 2:  # a trial of pointers: every register one, into the test memory or the game's heap
+                    regs = [rng.choice(choices[:1] + choices[3:])() for _ in range(13)]
+                    mem = rng.choice(dense)
+                else:
+                    regs = [rng.choice(choices)() for _ in range(13)]
+                    mem = rng.choice(pool)
                 flags = rng.getrandbits(4)
                 # the VFP registers: any bits, an ordinary float, a small integer (vcvt's input), or a value at a rule's
                 # edge (zeros, denormals, infinities, NaNs, the integer limits)
@@ -448,6 +519,19 @@ def main():
                 so.scratch(cmem)
                 so.run(idx, ctypes.byref(cpu))
                 if cpu.fault:
+                    why = FAULTS.get(cpu.fault, "fault %d" % cpu.fault)
+                    if cpu.fault == 1:  # what the address was: misaligned, near 0 (a null pointer's field), or elsewhere
+                        x = so.fault_at()
+                        why = "memory: %s" % ("an instruction needing alignment (ldrd, strd, ldm, stm)" if x == 0 else
+                                              "near 0 (a null pointer's field)" if x < 0x10000 else
+                                              "across a region's end" if at_mapped(x) else
+                                              "outside the game's and test's memory, at %02Xxxxxxx" % (x >> 24))
+                    if cpu.fault == 4:  # where to: code that is not a translated function, or data (lr changed)
+                        t = cpu.r[15] & ~1
+                        why += " (into %s)" % ("a listed function this run does not test" if t in listed else
+                                               "code, not a function's start" if any(lo <= t < lo + n for lo, n in executable)
+                                               else "data")
+                    rejected[why] += 1
                     so.undo()
                     continue
                 valid += 1
@@ -466,7 +550,19 @@ def main():
                 written.clear()
                 c_wrote = {la[k] for k in range(so.logged())}
                 try:
-                    uc.emu_start(s | (s in thumb), RET, count=200000)
+                    start = s | (s in thumb)
+                    for _ in range(1000):  # each call into data returns at once: Unicorn restarted at the return address
+                        try:
+                            uc.emu_start(start, RET, count=200000)
+                            break
+                        except UcError as e:
+                            if e.errno not in (UC_ERR_FETCH_PROT, UC_ERR_FETCH_UNMAPPED) or \
+                                    any(lo <= uc.reg_read(UC_ARM_REG_PC) < lo + n for lo, n in executable):
+                                raise
+                            lr = uc.reg_read(UC_ARM_REG_LR)
+                            cpsr = uc.reg_read(UC_ARM_REG_CPSR)
+                            uc.reg_write(UC_ARM_REG_CPSR, (cpsr & ~0x20) | (0x20 if lr & 1 else 0))
+                            start = lr
                 except UcError as e:
                     bad = "unicorn: %s at pc %08X (cpsr %08X)" % (e, uc.reg_read(UC_ARM_REG_PC), uc.reg_read(UC_ARM_REG_CPSR))
                     so.undo()
@@ -483,6 +579,7 @@ def main():
                     # Unicorn's instruction count ran out before the return (a long loop: X's 002A54A0 on a random length
                     # read ~20,000 elements, 4 November); C's own cap counts blocks and went further: no result to compare
                     valid -= 1
+                    rejected["the original ran past Unicorn's instruction count"] += 1
                     continue
                 ur = [uc.reg_read(r) for r in REGS] + [uc.reg_read(UC_ARM_REG_SP)]
                 cp = uc.reg_read(UC_ARM_REG_CPSR) >> 28
@@ -507,7 +604,7 @@ def main():
             if bad:
                 mismatched.append((s, bad))
             elif valid == 0:
-                untested += 1
+                untested.append((s, dict(rejected)))
             else:
                 matched += 1
                 thumb_matched += s in thumb
@@ -526,7 +623,7 @@ def main():
             os._exit(0)
         os.close(w)
         readers.append(r)
-    matched, mismatched, untested, thumb_matched = 0, [], 0, 0
+    matched, mismatched, untested, thumb_matched = 0, [], [], 0
     for r in readers:
         with os.fdopen(r) as f:
             text = f.read()
@@ -537,18 +634,29 @@ def main():
                                                  "run --only %X --jobs 1)" % (at, at) if at else
                                                  "before its first function (its error is above)"))
         m, bad, u, tm = json.loads(text)
-        matched, untested, thumb_matched = matched + m, untested + u, thumb_matched + tm
+        matched, untested, thumb_matched = matched + m, untested + [tuple(x) for x in u], thumb_matched + tm
         mismatched += [tuple(x) for x in bad]
     os.wait()  # (the children have all written: reap them)
     for _ in readers[1:]:
         os.wait()
     mismatched.sort()
     print("%d functions in the list; %d translated (%d of them call others); %d matched, %d mismatched, %d with no valid "
-          "trial" % (len(starts), len(funcs), with_calls, matched, len(mismatched), untested))
+          "trial" % (len(starts), len(funcs), with_calls, matched, len(mismatched), len(untested)))
     print("  Thumb: %d in the list, %d translated, %d matched" % (len(thumb - entry_thumb), sum(1 for f in funcs if f[0] in thumb),
                                                                thumb_matched))
     for s, why in mismatched[:20]:
         print("  MISMATCH %08X %s" % (s, why))
+    if untested:
+        # each untested function by its main reason: the one most of its trials were rejected for
+        main_reason = collections.Counter(max(why, key=why.get) if why else "no trial" for _, why in untested)
+        print("no valid trial, by the reason most of a function's trials were rejected for:")
+        for k, v in main_reason.most_common():
+            print("  %6d  %s" % (v, k))
+        if a.untested:
+            with open(a.untested, "w") as out:
+                out.write("# function\twhy its trials were rejected (trials)\n")
+                for f, why in sorted(untested):
+                    out.write("%08X\t%s\n" % (f, "; ".join("%s (%d)" % kv for kv in sorted(why.items(), key=lambda kv: -kv[1]))))
     print("not translated, by first reason (and the functions that wait for that reason alone, it included):")
     for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])[:12]:
         print("  %6d  %6s  %s" % (v, alone.get(k, "") if k != "calls an untranslated function" else "", k))
