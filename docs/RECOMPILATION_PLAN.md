@@ -369,6 +369,11 @@ Performance comes first in every design choice, the more so for the seamless co-
    25,913. Still without a valid trial: 4,118, 3,971, 13,402, 12,652; the main reason a null pointer's field (2,980
    in Omega Ruby's .code: objects absent from both dumps, or pointers built from random words), then loops past the
    step cap, alignment-needing instructions (ldm, ldrd) on random addresses, addresses outside the test's memory.
+   Then one RAM dump per menu module, taken headless with no picture needed: the X menu's entries opened one by one
+   from the owner's saves, each dump taken once Azahar's log shows its module loaded (Omega Ruby: DllPokeList,
+   DllStatus, DllBag, DllTrainerCase, DllReport; X: DllPokeList, DllStatus, DllZukan, DllBag, DllTrainerCase), each
+   `--retest` pass on what the last left: Omega Ruby .code **22,570**, modules **29,561**; X .code **21,886**, modules
+   **27,257**; **0 mismatched**. Still without a valid trial: 3,624, 12,210, 3,544, 11,308.
    Step 3: `src/hos/` (kernel, threads, loader, IPC, srv, APT, ndm, cfg, ptm, frd, boss, fs (RomFS), hid, gsp with a
    null GPU) runs Omega Ruby's translated code natively (`game <extracted dir> <.3ds>`) to its **first GPU command list**
    (29,824 bytes submitted); its main thread's first 388 system calls equal Azahar's, in order
