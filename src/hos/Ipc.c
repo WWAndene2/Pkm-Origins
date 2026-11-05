@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const HosService* const services[] = {&hos_srv, &hos_apt_a, &hos_apt_u, &hos_ndm_u, &hos_cfg_u, &hos_ptm_u, &hos_frd_u, &hos_boss_u, &hos_fs_user, &hos_hid_user, &hos_gsp_gpu, &hos_dsp_dsp, &hos_ldr_ro, &hos_nwm_uds};
+static const HosService* const services[] = {&hos_srv, &hos_apt_a, &hos_apt_u, &hos_ndm_u, &hos_cfg_u, &hos_ptm_u, &hos_frd_u, &hos_boss_u, &hos_fs_user, &hos_hid_user, &hos_gsp_gpu, &hos_dsp_dsp, &hos_ldr_ro, &hos_nwm_uds, &hos_cecd_u};
 
 uint32_t hos_in(HosRequest* q, int k)
 {

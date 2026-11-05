@@ -214,6 +214,25 @@ static void pull_packet(HosRequest* q)
     hos_out_static(q, 4, 0, empty, size);
 }
 
+/* the beacons of the networks around (none): the reply header (the buffer's size, the size written, 0 entries) in the
+   mapped buffer, then the caller sleeps 300 ms as Azahar has it (UDSBeaconScanInterval) */
+static void recv_beacon_broadcast_data(HosRequest* q)
+{
+    uint32_t size = hos_in(q, 1), desc = hos_in(q, 19), at = hos_in(q, 20);
+    uint8_t* out = hos_pointer(at);
+    w32(out, size);
+    w32(out + 4, 12);
+    w32(out + 8, 0);
+    hos_reply(q, 1, 2);
+    hos_out(q, 1, HOS_OK);
+    hos_out(q, 2, desc);
+    hos_out(q, 3, at);
+    static HosObject* never; /* (a wait only the timeout ends, as SleepThread's) */
+    if (!never)
+        never = hos_object_new(HOS_EVENT);
+    hos_wait(q->thread, &never, 1, 0, 300000000, NULL);
+}
+
 static void get_channel(HosRequest* q)
 {
     uint32_t s;
@@ -238,6 +257,7 @@ static const HosCommandEntry commands[] = {
     {0x0008, destroy_network, "DestroyNetwork"},
     {0x000B, get_connection_status, "GetConnectionStatus"},
     {0x000D, get_node_information, "GetNodeInformation"},
+    {0x000F, recv_beacon_broadcast_data, "RecvBeaconBroadcastData"},
     {0x0010, set_application_data, "SetApplicationData"},
     {0x0012, bind, "Bind"},
     {0x0014, pull_packet, "PullPacket"},

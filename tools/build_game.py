@@ -150,6 +150,9 @@ def main():
                 "        if (*M[i].base && t - *M[i].base < M[i].size) {\n"
                 "            if ((k = find(M[i].a, M[i].n, t - *M[i].base)) >= 0) { M[i].t[k](c, ret); return; }\n"
                 "            break;\n        }\n"
+                "    /* a target on the nop (mov r0, r0) some functions open on, the function listed after it: the\n"
+                "       same code (DllField+424AC, called through a pointer, 5 November) */\n"
+                "    if (!(t & 3) && ld32(c, t) == 0xE1A00000u) { call_indirect(c, t + 4, ret); return; }\n"
                 "    c->r[15] = t; c->fault = HOS_FAULT_NOT_TRANSLATED;\n}\n" % len(keys))
     srcs.append(path)
     trace = ["-DHOS_GPU_TRACE"] if a.gpu_trace else []

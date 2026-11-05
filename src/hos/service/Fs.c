@@ -98,6 +98,19 @@ static int open_in(HosRequest* q, uint32_t archive, uint32_t type, uint32_t size
         *handle = open_session(f);
         return 1;
     }
+    if (archive == ARCHIVE_SELF_NCCH && type == 2 && size == 12 && ld32(&q->thread->cpu, address) == 2) {
+        /* an ExeFS file, named by the path's 8 bytes after its type ("icon": the SMDH), Azahar's SelfNCCH */
+        char name[9] = {0};
+        for (int k = 0; k < 8; k++)
+            name[k] = (char)ld8(&q->thread->cpu, address + 4 + k);
+        FsFile f = {2, 0, 0, NULL};
+        uint32_t n = 0;
+        if ((f.data = hos_exefs_file(name, &n))) {
+            f.size = n;
+            *handle = open_session(f);
+            return 1;
+        }
+    }
     stop(q, "open file", archive, type, size, address);
     return 0;
 }
