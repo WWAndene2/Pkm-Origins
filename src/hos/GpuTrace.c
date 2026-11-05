@@ -8,6 +8,7 @@
  * stores takes the oldest one's origin (ldm then stm, ldrb then strb: the same order), so a command list copied from
  * a buffer read from a file is credited to the file, not to memcpy. A copy from a word of no known origin (the
  * program's own tables, as loaded) is credited to the copy's caller chain, marked as such, with the addresses.
+ * Every call is also counted by caller and callee ($HOS_GPU_TRACE_CALLS): the call graph as the game runs it.
  */
 #ifdef HOS_GPU_TRACE
 #include "GpuTrace.h"
@@ -83,6 +84,37 @@ static uint32_t chain_here(int skip)
     }
     memcpy(table[h].fn, chain, sizeof chain);
     return h + 1;
+}
+
+/* the calls made, by caller and callee (the edges of the call graph as run), for tools/gpu_map.py */
+enum { EDGES = 1 << 20 };
+static struct { uint32_t from, to; unsigned long long count; } edges[EDGES];
+
+void hos_gpu_trace_call(uint32_t to)
+{
+    uint32_t from = hos_fn_depth > 0 && hos_fn_depth <= 8192 ? hos_fn_stack[hos_fn_depth - 1] : 0;
+    uint32_t h = ((from * 2654435761u) ^ (to * 40503u)) >> 12;
+    for (int n = 0; n < EDGES; n++, h = (h + 1) % EDGES) {
+        if (edges[h].count && (edges[h].from != from || edges[h].to != to))
+            continue;
+        edges[h].from = from;
+        edges[h].to = to;
+        edges[h].count++;
+        return;
+    }
+}
+
+static void write_edges(void)
+{
+    const char* path = getenv("HOS_GPU_TRACE_CALLS");
+    FILE* f = path ? fopen(path, "w") : NULL;
+    if (!f)
+        return;
+    fprintf(f, "# lists %llu\n# caller\tcallee\tcalls\n", lists);
+    for (int i = 0; i < EDGES; i++)
+        if (edges[i].count)
+            fprintf(f, "%08X\t%08X\t%llu\n", edges[i].from, edges[i].to, edges[i].count);
+    fclose(f);
 }
 
 void hos_gpu_trace_load(uint32_t a)
@@ -165,6 +197,7 @@ void hos_gpu_trace_list(uint32_t address, uint32_t size)
 
 void hos_gpu_trace_write(void)
 {
+    write_edges();
     const char* path = getenv("HOS_GPU_TRACE");
     FILE* f = path ? fopen(path, "w") : NULL;
     if (!f)
