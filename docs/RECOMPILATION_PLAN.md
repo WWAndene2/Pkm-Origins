@@ -501,6 +501,17 @@ full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResource
   blue in each other's places (Pomegrade's PicaTexture.cpp, decoding them): given to the GPU as ETC2 after the blocks
   are reordered and byte-swapped and read with red and blue swizzled (no pixel recomputed: decision 2 holds, seen in
   the decoder, not yet tried on a GPU). ETC1A4 (its 4-bit alpha apart) is decoded to RGBA8.
+- **A material's shader binding** (`Gfx_SetupMaterialUniforms` 0x31F808, when a model is set up; read): for each
+  material that has a shader, a 0x104-byte binding block (`Util_StateBlock_Reset`) whose uniforms are found by name
+  in the shader (`Gfx_Shader_FindUniform` 0x4A7D00): `TexMtx0`-`TexMtx2`, `TexTran`, `TexcMap`, `MatAmbi`, `MatDiff`
+  (the H3D shaders name their uniforms: the translated shaders can keep the names), skinning bound by
+  `Gfx_SkeletalAnimBind`, and three command lists kept in the material (its words 2-7: address and size each):
+  0x4A7A34 (Pomegrade's guessed name `Gfx_BuildShadowCommandList` is wrong: read, it uploads the shader programs,
+  the geometry shader's when there is one, their code and operand descriptors in 0x80-word chunks) and 0x4A7FB8
+  (`Gfx_WriteCommandList`) twice, variants 0 and 1: the programs' configuration and entry points (register value
+  0x7FFF0000 | entry), the vertex program's index at the block's word 0, the geometry program's at word 1 (-1: none).
+  So the shaders reach the GPU from the BCH's shader records, once a model; the renderer reads those records and
+  their translated SPIR-V instead.
 - To read next: the 0x174-byte material record and the mesh node in full (their fields as `Gfx_BuildCommandList` and
   the draw path read them), the BCH material's parameter block (Bch.h has its render state, inferred from 12,481
   materials), and the shaders' records (SPICA's H3DShader: the program and its uniforms).
