@@ -25,7 +25,19 @@
 0019B6E8	00199DEC	Gfx_WriteMatrix3x4Command	a 3x4 matrix into a uniform upload command	helper	read
 0013EA34	0013F804	Gfx_SetViewport	rasterizer and output state each frame (viewport, framebuffer)	replace	traced
 00123888	00122D3C	Gfx_SetFramebufferBlend	output state each frame (blending, framebuffer)	replace	traced
-00184020	00183018	Gfx_H3d_WriteDrawState	a 3D model's state for each draw (shader configuration, combiners, textures, attributes, uniforms; the one geometry shader user), called by the H3D runtime at 0x2F3000-0x31B000	to read	traced
+00184020	00183018	memcpy_unaligned	the C library's byte-exact copy (any alignment); the H3D runtime copies the BCH's precompiled command blocks with it (the trace credited it, its callers below are the authors)	helper	read
+002EC354	002D6ED0	Gfx_H3d_DrawSubmesh	one submesh's draw: kind 0x10000001 (model mesh): shader (0x2F3F64), mesh state (0x2F529C), material and textures (0x2EC920), then the BCH's draw block (+0x68, size +0x6C); kind 0x10000002: its own block, then uniform uploads (0x80000006 / 0x80000019 headers: 3x4 and 4x4 matrices, vec4 constants) built here	replace	read, traced
+002F3F64	002DEAE4	Gfx_H3d_BindShader	the shader when changed: program state (0x2F5DE8), default state restored after a geometry shader (0x2F3ED8), then the material's virtual +0xC	replace	read, traced
+002F51FC	002DFD7C	Gfx_H3d_BindShaderIfNeeded	the shader of the other submesh kind: default state when owed (0x31A9D8), 0x2F3F64 unless both shaders share flag 0x20	replace	read, traced
+002F5DE8	002E0968	Gfx_H3d_WriteShaderState	the BCH's shader program block (+0x38, size +0x3C) when the program changes, then the shader's own block (+0x7C, size +0x80); collects the boolean uniforms into the state (+0x14, +0x2C for the geometry shader)	replace	read, traced
+002F529C	002DFE1C	Gfx_H3d_WriteMeshState	the mesh's block (+0x60, size +0x64) and its 0x30 inline bytes (+0x30), then its two flags (+0x2C) into the state	replace	read, traced
+002EC920	002D749C	Gfx_H3d_WriteMaterial	the material's uniforms (0x80000006 header), its matrix (0x80000019) when no skin, then per pass 0x2F406C	replace	read, traced
+002F406C	002DEBEC	Gfx_H3d_WriteTextures	the combiner words (6, 0x1237BC; 6 more with a geometry shader), then each enabled texture's BCH block (+0x18, size +0x1C)	replace	read, traced
+0031A9D8	003054BC	Gfx_H3d_WriteDefaultState	a fixed 0x170-byte block of default state (after a geometry shader, or when owed)	replace	read, traced
+002F8158	002E2CD0	Gfx_H3d_BindLut	a lookup table into slot N when it changed (header from the slot, then the BCH's table block)	replace	read (registers inferred)
+003085D8	002EFC28	Gfx_H3d_WriteSceneEnvironment	scene state each frame: fog (float24 conversion), lights and their tables (614 lines, only skimmed)	replace	traced, inferred
+001237BC	00122C70	Util_Copy24	a 24-byte copy (6 command words) returning the advanced pointers	helper	read
+00123C78	0012312C	Util_CopyUnrolled	an unrolled copy by 32 bytes with preloads	helper	read
 00300B28	00300EF8	memcpy	the C library's copy (unaligned head, then 0x144D28)	helper	read
 00144D28	00144F34	memcpy_aligned	the copy's aligned part (ldm / stm by 32 bytes)	helper	read
 0031FC24	-	Gfx_ModelResourceSetup	a BCH used in place: header checked, relocated, materials' uniforms set up	input	read

@@ -448,7 +448,7 @@ Performance comes first in every design choice, the more so for the seamless co-
    geometry shader unit's (0x291): the PICA200's fourth unit runs vertex shaders when no geometry shader is on, and is
    given the same uniforms. The control registers' values over 150 s on the field ($HOS_GPU_TRACE_VALUES):
    GPUREG_GEOSTAGE_CONFIG (0x229) 0 in 174,989 settings, 0x100 in 654, 2 (geometry shader on) in 120, set by
-   0x184020 alone (an effect, to identify). So nearly every draw needs no geometry shader; the rare one is to be
+   0x184020 alone (read later: a copy; the setting is in a BCH shader's own command block, see step 1's 3D path). So nearly every draw needs no geometry shader; the rare one is to be
    rewritten (vertex shader expansion or compute), not emulated, on Mali.
    `Gfx_BuildCommandList` (first reading): its list is a record (render state + 0x44) holding the command buffer
    (+0x10, words used +0x1C), a count of draw items (+4, +6) and the items at +0x28, 0x2C bytes each, each pointing
@@ -483,7 +483,7 @@ results so the rest of the game cannot tell (each replacement listed in `symbols
 
 To read before the first line of renderer code: the material record and state block field by field, the mesh node in
 full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResourceSetup` 0x31FC24,
-`Gfx_CreateModelInstance` 0x39A084 and around), and the one geometry shader user (0x184020).
+`Gfx_CreateModelInstance` 0x39A084 and around), and the H3D runtime's draw path (read: step 1's 3D path below).
 
 **Step 1's first reads (5 November; Ghidra, Pomegrade's names, roles read from the code):**
 - A model is its BCH file used in place: `Gfx_ModelResourceSetup` (0x31FC24) checks the header (magic, the
@@ -540,7 +540,7 @@ full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResource
     each, `Gfx_ComputeBoneMatrices`), indexes and flags: skinned meshes' bone matrices computed by the game's code
     each frame and sent as uniforms.
 - **The list** (5 November): `symbols/gfx_library.tsv`, 31 functions in both games: 17 to replace, 6 whose records
-  the renderer reads (inputs), 7 helpers kept, 1 to read (0x184020, the geometry shader's one user). Of the mesh node,
+  the renderer reads (inputs), 7 helpers kept, 1 to read (0x184020: read since, a copy; the 3D path's rows added below). Of the mesh node,
   known: its material (+0x104: a flag byte +8, shader flags +9, its draw records +0x10 / +0x14 / +0x18, +0x1C a layout
   part), state block (+0xD4) and count (+0xFA), changed flag (+0xFE), built buffer (+0x100), layout positions (+0xD8,
   +0xDC), its object constants (+0x48, +0x4C, matrix at +0x80), draw flags (+0xB3-0xB6); the rest is read when the
@@ -562,8 +562,29 @@ full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResource
   - 0x1237BC (combiners 67 %, lighting, output), 0x1F8FD8 and 0x123C78 (vertex attributes 82-84 %: a mesh's
     buffers), 0x3085D8 (blending, textures, lighting), 0x1F844C (rasterizer, geometry pipeline), and the shader
     setup (0x4A7A34, 0x31F808, 0x1F8070).
-  So step 1 is not done: the 3D path (0x184020 and the H3D runtime calling it) is to read the same way, and
-  `symbols/gfx_library.tsv`'s "mesh node" rows renamed for what they are (2D quads).
+  The 3D path is read below.
+- **The 3D path, read (5 November; Ghidra, against the trace):** 0x184020 is the C library's byte-exact copy
+  (`memcpy_unaligned`), credited by the trace because it moves command words; its callers are the authors. The H3D
+  runtime (shared with X, identical code) draws a model as the BCH's own precompiled command blocks copied one after
+  another to a global list cursor, with few words built at run time:
+  - `Gfx_H3d_DrawSubmesh` (0x2EC354), per submesh: for a model mesh (kind 0x10000001) the shader
+    (`Gfx_H3d_BindShader` 0x2F3F64 → `Gfx_H3d_WriteShaderState` 0x2F5DE8: the program block only when the program
+    changes, then the shader's block; its boolean uniforms gathered), the mesh's block and 0x30 inline bytes
+    (`Gfx_H3d_WriteMeshState` 0x2F529C), the material (`Gfx_H3d_WriteMaterial` 0x2EC920: uniforms with headers
+    0x80000006 / 0x80000019, then `Gfx_H3d_WriteTextures` 0x2F406C: 6 combiner words, 6 more with a geometry shader,
+    each enabled texture's block), and last the draw block; the other kind (0x10000002) writes its matrices and vec4
+    uniforms itself;
+  - the geometry shader: turned on by a BCH shader's own block; after it, `Gfx_H3d_BindShader` restores the default
+    state (0x2F3ED8, and `Gfx_H3d_WriteDefaultState` 0x31A9D8: a fixed 0x170-byte block);
+  - `Gfx_H3d_BindLut` (0x2F8158): a lookup table per slot, only when changed; `Gfx_H3d_WriteSceneEnvironment`
+    (0x3085D8): fog, lights, each frame (skimmed only);
+  - 0x1237BC and 0x123C78 are copies (24 bytes; unrolled); 0x1F8FD8 (named `Snd_VoiceParams_Init` by
+    Pomegrade, doubtful) is called only by `Gfx_Shader_WriteProgramUpload` at a model's setup, never per frame:
+    a helper of the shader upload, not a per-draw writer.
+  For the renderer: a model's GPU state is data in its BCH (blocks of PICA200 registers), so the replacement of these
+  functions reads the same blocks once, at load, into Vulkan pipelines and descriptor sets (the blocks are
+  decoded, not run each frame), keyed by shader, mesh and material; per draw remain the uniforms and the draw.
+  With this, step 1 is done: `symbols/gfx_library.tsv` has 43 rows.
 - To read next: the 3D path above (their fields as `Gfx_BuildCommandList` and
   the draw path read them), the BCH material's parameter block (Bch.h has its render state, inferred from 12,481
   materials), and the shaders' records (SPICA's H3DShader: the program and its uniforms).
@@ -604,7 +625,7 @@ full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResource
 - **Tilers (Mali, Adreno binned, PowerVR)**: each screen's pass clears or loads nothing it need not, depth and MSAA
   images transient and lazily allocated, MSAA resolved in the pass, effects that read the frame as subpasses, narrow
   barriers, no readback in a frame, AFBC kept on Mali (no storage usage on render targets).
-- **Mali**: no geometry shader (the one user, 0x184020, rewritten as vertex expansion or compute), 16-bit varyings
+- **Mali**: no geometry shader (the BCH shaders whose blocks turn it on, rewritten as vertex expansion or compute), 16-bit varyings
   where exact, static descriptor sets, at most 128 bytes of push constants, the vertex count far below the 180 MB
   limit (inferred: the 3DS's scenes are small).
 - **Adreno**: one depth direction per pass, opaque before transparent (LRZ).
