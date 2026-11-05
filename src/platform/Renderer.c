@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "../hos/Memory.h"
+#include "PicaFragment.h"
 #include "PicaRegs.h"
 
 extern uint8_t* hos_memory;
@@ -54,9 +55,36 @@ static void count(const char* fmt, ...)
     }
 }
 
+/* $HOS_FRAGMENT_DIR: each distinct fragment shader the draws need, one file each (for the compile check) */
+static void save_fragment(const PicaState* s)
+{
+    static const char* dir;
+    static int checked, saved;
+    static uint64_t seen[4096];
+    if (!checked) { dir = getenv("HOS_FRAGMENT_DIR"); checked = 1; }
+    if (!dir || saved >= 4096)
+        return;
+    static char glsl[1 << 17];
+    long n = pica_fragment_glsl(s, glsl, sizeof glsl);
+    if (n < 0)
+        return;
+    uint64_t h = 1469598103934665603ull;
+    for (long k = 0; k < n; k++)
+        h = (h ^ (uint8_t)glsl[k]) * 1099511628211ull;
+    for (int k = 0; k < saved; k++)
+        if (seen[k] == h)
+            return;
+    seen[saved] = h;
+    char path[600];
+    snprintf(path, sizeof path, "%s/fragment_%04d.frag", dir, saved++);
+    FILE* f = fopen(path, "w");
+    if (f) { fwrite(glsl, 1, n, f); fclose(f); }
+}
+
 static void on_draw(PicaState* s, int indexed, void* user)
 {
     (void)user;
+    save_fragment(s);
     const uint32_t* r = s->reg;
     draws++;
     static const char* topology[] = {"triangles", "strip", "fan", "geometry shader"};
@@ -92,9 +120,9 @@ void renderer_submit_list(uint32_t address, uint32_t size)
 {
     if (!ready) {
         const char* path = getenv("HOS_DRAW_STATS");
-        if (!path)
+        if (!path && !getenv("HOS_FRAGMENT_DIR"))
             return;
-        stats = fopen(path, "w");
+        stats = path ? fopen(path, "w") : NULL;
         pica_state_init(&state, on_draw, physical, NULL);
         ready = 1;
     }
