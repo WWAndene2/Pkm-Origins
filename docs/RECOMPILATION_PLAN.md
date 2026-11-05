@@ -379,3 +379,10 @@ Performance comes first in every design choice, the more so for the seamless co-
    from ready-made buffers, which supports the inference above (the models' files hold them). The callers sit in
    0x300000-0x33A000, beside Pomegrade's `Gfx_BuildCommandList` (0x33899C): the library's core. Next: the trace
    to look through the copies (credit the source buffer, not memcpy), and the same on X.
+   Through the copies (memcpy 0x144D28 and 0x300B28, HOS_GPU_TRACE_COPY), 60 s at the title: 64.1 % of the words are
+   written by code, 28.8 % copied from the program's own initialised data, 7.1 % read from one RomFS file (0x3C4
+   bytes at RomFS offset 0x5B71C0F0, a ready-made command list). The largest writer is `Gfx_BuildCommandList`
+   (0x33899C, 29.7 %, called by `Gfx_UpdateDrawState` 0x326FA8), with `Gfx_FlushLightAndMatrixCommands` (0x33917C,
+   9.6 % written or copied); 16.6 % are copied by 0x1499BC from the data at 0x5A4F4C-0x5B0B48 (templates). So the
+   inference above holds only in part at the title: most of the lists are built by code each frame, the models' data
+   among the inputs. Not yet looked at: which file the RomFS offset is, what 0x1499BC and 0x14AFA8 draw.
