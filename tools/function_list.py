@@ -77,7 +77,8 @@ def main():
             first = struct.unpack_from("<I", data, w - a.base)[0]
             if first >> 16 == 0xE92D or first == 0xE1A00000:  # push {..., lr}: a function's usual start; or the nop
                 pointers.add(w)  # some open on (Omega Ruby's 00370774, a Pawn native, from the natives table)
-        elif a.base < w < text_end and w & 3 == 1:  # a Thumb pointer (address | 1) to a Thumb push {..., lr}
+        elif a.base < w < text_end and w & 1:  # a Thumb pointer (address | 1: a Thumb start is halfword-aligned) to a
+            # Thumb push {..., lr}
             if half(w - 1) >> 8 == 0xB5 and thumb_valid(half, w - 1, text_end):  # that reads as Thumb (Omega Ruby's
                 pointers.add(w - 1)  # 0020FD3C is an ARM bl, 0xEB00xxxx, whose low half reads as a push)
                 pointer_thumb.add(w - 1)
@@ -121,6 +122,23 @@ def main():
     if rounds == 12:
         raise SystemExit("the calls did not settle in 12 rounds")
     pointers -= set(calls)
+    # Leaf Thumb functions found by a pointer alone (no push to recognise them): a pointer into the gap the walk left
+    # after a Thumb function, that reads as Thumb (Omega Ruby's 00100C72 and 00100C82, callbacks named at 0033CCC0, end
+    # on a b into the function before them; 5 November). Anywhere else such words are mostly code or data that look
+    # like pointers (962 in Omega Ruby's .code), so only gaps count.
+    known = sorted(flow | imported | pointers | set(calls))
+    for off in range(0, len(data) - 3, 4):
+        w = struct.unpack_from("<I", data, off)[0]
+        t = w - 1
+        if not (w & 1 and a.base < w < text_end) or t in pointers:
+            continue
+        k = bisect.bisect(known, t) - 1
+        if k < 0 or known[k] == t or known[k] not in thumb:
+            continue
+        nxt = known[k + 1] if k + 1 < len(known) else text_end
+        if min(ends.get(known[k], nxt), nxt) <= t < nxt and thumb_valid(half, t, text_end, frozenset(known), strict=False):
+            pointers.add(t)
+            thumb.add(t)
     kinds = {}
     for addr in flow:
         kinds[addr] = "flow"
@@ -416,6 +434,8 @@ def thumb_valid(half, start, text_end, starts=frozenset(), strict=False):
                     todo.append(t)
                 elif strict:
                     return False  # a short run ending in a b out of it: a table or data
+                elif t in starts:
+                    returns += 1  # (a tail call into a known function: Omega Ruby's 00100C82, b to 00100C5C)
                 break
             elif h == 0x4770 or h >> 8 == 0xBD:
                 returns += 1
