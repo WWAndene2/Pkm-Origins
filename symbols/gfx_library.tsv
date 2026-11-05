@@ -18,8 +18,7 @@
 00323D98	0030E998	Gfx_SetTextures	texture unit commands between draws	replace	traced
 00323810	0030E40C	Gfx_SetCombiners	combiner state between draws	replace	traced
 0032403C	0030EC3C	Gfx_WriteObjectUniforms	vertex shader uniforms each frame (matrices)	replace	traced
-004BCD14	0048BEE4	Gfx_WriteLightUniforms	vertex shader uniforms each frame (to read: lights, inferred)	replace	traced
-0015EB38	0015E880	Gfx_WriteViewUniforms	vertex shader uniforms each frame (to read: camera, inferred)	replace	traced
+004BCD14	0048BEE4	Gfx_Quad_ComputeTexCoords	a 2D quad's texture coordinates (up to 3 units: size, scale, rotation, offset), 4 corners each, into the batch staging; returns 6 when the corners differ (Pomegrade had no name; was "light uniforms", wrong)	replace	read, traced
 00144CA8	00144EB4	Util_Copy48	a 48-byte copy (a 3x4 matrix)	helper	read
 0019B76C	00199E70	Gfx_WriteMatrix4Command	a 4x4 matrix into a uniform upload command (components reversed)	helper	read
 0019B6E8	00199DEC	Gfx_WriteMatrix3x4Command	a 3x4 matrix into a uniform upload command	helper	read
@@ -34,8 +33,8 @@
 002EC920	002D749C	Gfx_H3d_WriteMaterial	the material's uniforms (0x80000006 header), its matrix (0x80000019) when no skin, then per pass 0x2F406C	replace	read, traced
 002F406C	002DEBEC	Gfx_H3d_WriteTextures	the combiner words (6, 0x1237BC; 6 more with a geometry shader), then each enabled texture's BCH block (+0x18, size +0x1C)	replace	read, traced
 0031A9D8	003054BC	Gfx_H3d_WriteDefaultState	a fixed 0x170-byte block of default state (after a geometry shader, or when owed)	replace	read, traced
-002F8158	002E2CD0	Gfx_H3d_BindLut	a lookup table into slot N when it changed (header from the slot, then the BCH's table block)	replace	read (registers inferred)
-003085D8	002EFC28	Gfx_H3d_WriteSceneEnvironment	scene state each frame: fog (float24 conversion), lights and their tables (614 lines, only skimmed)	replace	traced, inferred
+002F8158	002E2CD0	Gfx_H3d_BindLut	a lookup table into slot N when it changed: lighting LUT index (0x1C5, value slot << 8, slots above 6 shifted one), slot 0x17 the fog LUT (index 0x0E6, data 0x0E8-0x0EF); then the BCH's table block	replace	read (literals 0x000F01C5), traced
+003085D8	002EFC28	Gfx_H3d_WriteRenderState	a draw's fixed-function state: culling (0x040), texture units (0x080, 0x08F), fog mode (0x0E0, float24 fog values), alpha, stencil, depth and colour masks (0x104-0x107), shadow (0x126), lighting LUT input (0x1C6); lights through 0x319CF0 (traced registers; 614 lines, not read line by line)	replace	traced, read (structure)
 001237BC	00122C70	Util_Copy24	a 24-byte copy (6 command words) returning the advanced pointers	helper	read
 00123C78	0012312C	Util_CopyUnrolled	an unrolled copy by 32 bytes with preloads	helper	read
 00300B28	00300EF8	memcpy	the C library's copy (unaligned head, then 0x144D28)	helper	read
@@ -48,3 +47,54 @@
 004BB450	0048AA00	Gfx_SetupMeshBuffers	a mesh's bones (3x4 matrices), indexes and flags	input	read
 004A7A34	00477474	Gfx_Shader_WriteProgramUpload	the shader programs' code and operand descriptors (Pomegrade's Gfx_BuildShadowCommandList: not shadows)	replace	read
 004A7FB8	004779F8	Gfx_Shader_WriteConfig	the shader programs' configuration and entry points (variants 0 and 1)	replace	read
+00136B34	001377D4	Gfx_BuildStartupList	called once at start: builds through 0x14AFA8 the command list that 30 % of the words submitted each frame come from (built once, submitted again)	replace	traced
+0014AFA8	0014B984	Gfx_BuildShaderSetupList	a shader setup list: a fixed 0x140-byte head, the program's code (0x2CC) and operand descriptors in chunks of 128 words, attribute configuration (0x200-0x204), uniforms (0x2C0), and a 0x9C0-byte table of 26 x 6 vec4 made once	replace	read, traced
+001499BC	0014A3C0	Gfx_CmdBuf_Append	appends bytes to a command buffer {base, used} (the copy is memcpy)	helper	read
+001499E8	0014A3EC	Gfx_CmdBuf_Init	a command buffer's start and size	helper	read (inferred from calls)
+00149A14	0014A418	Gfx_CmdBuf_Align	pads a command buffer to an 8-byte boundary	helper	read (inferred from calls)
+0015F800	00145D80	Res_DecompressLz10Lz11	decompresses an archive member: the BCH files whose own command blocks the GPU jumps to (shader code 0x2CC)	input	read, traced
+0016DFE8	0016D680	Gfx_CmdList_AddBuffer	a prebuilt buffer into the current list: copied in (flag), or the list closed (0x1423A0) and the buffer queued as its own entry	replace	read
+001423A0	001431D0	Gfx_CmdList_Finish	closes the current list (pads to 16 bytes, framebuffer flush and invalidate 0x111 / 0x110, end 0x010) and queues it for GSP	replace	read, traced
+00157FBC	00157CBC	Gfx_CmdList_FinishIfNotEmpty	0x1423A0's work when the list holds words	replace	read, traced
+0014B7BC	0014C198	Gfx_WriteViewRecord	a 0x60-byte record (a 4x4 matrix copied in by 0x15EB38) into the list each frame (0x2C1)	replace	read, traced
+0015EB38	0015E880	Util_Copy64	a 64-byte copy (a 4x4 matrix), skipped when source is destination	helper	read
+0033959C	00324020	Gfx_WriteLayoutHeader	a layout part's head: texture unit setup (0x080, 0x06F), fixed words, then its prebuilt buffer	replace	read, traced
+0033895C	003233E0	Gfx_WriteLayoutHeaderEmpty	0x33959C's head without a buffer	replace	read, traced
+00136BFC	0013789C	Gfx_SetVec3	a vec3 (s0-s2) and a constant into a record (+0x74-0x80), then written as a uniform	helper	read
+00324BE0	0030F7E0	Gfx_Batch_AddVec4	a vec4 into a batch's staging (+0x670, count +0x26)	replace	read
+003246CC	0030F2CC	Gfx_Batch_AddObjectIndex	an object's index into a batch (+0x668); flushes (0x32430C) when the staging is full (26 objects, 32 vec4)	replace	read
+00324BA8	0030F7A8	Gfx_Batch_AddMatrix	a 3x4 matrix into a batch's staging (+0x66C, 3 vec4)	replace	read
+002F415C	002DECDC	Gfx_H3d_WriteCamera	the camera when it changed: view 3x4 (+0x148) and projection 4x4 (+0x1A8) to the vertex shader's and geometry unit's uniforms (0x2C0, 0x290)	replace	read, traced
+00319368	00302EDC	Gfx_H3d_WriteLighting	a material's lighting: two vec4 uniforms (indexes 0x14, 0x15), the light count and permutation (0x1C0-0x1D9), ambient as material x scene, clamped	replace	read, traced
+00319CF0	00302A08	Gfx_H3d_WriteLights	the scene's lights each frame (vec4 and matrix uniforms, headers 0x80000000 / 0x8000000A / 0x80000013), called by 0x3085D8	replace	read (skimmed), traced
+0031AA08	003054EC	Gfx_H3d_SetGeometryStage	the geometry stage on or off (+0xB0: 0 or 2), then a 0x138-byte state block (0x123C78)	replace	read
+001237D8	00122C8C	Util_Copy32	a 32-byte copy (8 command words) returning the advanced pointers	helper	read
+00301FBC	00301A9C	memset_zero	zeroes a buffer (uniform space cleared, 0x2C1)	helper	read
+001F8FD8	001E4228	Gfx_Shader_WriteStageConfig	(Pomegrade: Snd_VoiceParams_Init, wrong) at a model's setup, from 0x4A7A34: vertex input and geometry stage configuration (0x200, 0x229, 0x244, 0x251, 0x25E)	replace	traced
+001F8070	001E32C8	Gfx_Shader_WriteOperandDescs	(Pomegrade: Gfx_SkeletalAnimBind, doubtful) at setup: shader operand descriptors (0x2D6)	replace	traced
+001F844C	001E36A4	Gfx_BuildShaderAttribCommands	at setup: geometry pipeline and attribute registers (0x252, 0x253, 0x25E, 0x289, 0x2BA, 0x2BD)	replace	traced
+001F90C8	001E4318	Gfx_BuildRegisterCommands	at setup: float uniforms (0x2C0-0x2C3)	replace	traced
+004A7C60	004776A0	Util_CopyInChunks80	the shader code's upload in chunks (0x2CC, 0x2D6)	helper	traced
+0017C360	0017B7B0	Gfx_WriteFloat24Matrices	fixed vertex attribute values (0x233-0x235) each frame	replace	traced
+00168478	001677BC	Gfx_DebugDumpMatrices	(Pomegrade's name, doubtful: it writes uniforms 0x2C1-0x2C4 each frame)	replace	traced
+0019B628	00199D2C	Gfx_WriteVec4Command	a vec4 into a uniform upload command	helper	traced
+0019B65C	00199D60	Gfx_WriteVec4x2Command	two vec4 into a uniform upload command	helper	traced
+0019B7B8	00199EBC	Gfx_WriteVec3Command	a vec3 (w from the call) into a uniform upload command	helper	traced
+0019B6B0	00199DB4	Gfx_WriteMatrix3x4CommandPlain	a 3x4 matrix, no transform, into a uniform upload command	helper	traced
+004BE4EC	0048D83C	Gfx_Quad_WriteMatrix	a 2D quad's 3x4 matrix (+0x80) with its pivot (+0x48), Y flipped	replace	read
+00177418	00176708	Gfx_Shader_WriteGeometryCode	geometry shader code upload (0x29C, 0x2CC)	replace	traced
+0017C0E4	0017B534	Gfx_SetupViewportScissor	viewport, depth, scissor, framebuffer setup (0x041-0x06D, 0x0E0, 0x100-0x104)	replace	traced
+001821A0	00181228	Gfx_SetScissorRect	scissor (0x065-0x067)	replace	traced
+001F9668	001E4884	Gfx_CmdBuf_WriteJumpSize	command buffer jump size (0x23D)	replace	traced
+001F96C8	001E48E4	Gfx_CmdBuf_Call	a call into another command buffer (0x238-0x23C, through 0x1F97C4 and 0x1F9778)	replace	traced
+001F9778	001E4994	Gfx_CmdBuf_WritePad	padding words (register 0x000)	helper	traced
+001F97C4	001E49E0	Gfx_CmdBuf_WriteJump	command buffer addresses, size and jump (0x238-0x23C)	replace	traced
+0050CF28	004D4FC0	Gfx_CmdBuf_CallWithRestart	a buffer call with primitive restart (0x238-0x23C, 0x25E)	replace	traced
+0050D1CC	004D5264	Gfx_CmdList_FinishOther	a list's end (0x111, 0x110, 0x010, 0x25E): 0x1423A0's twin	replace	traced
+002EC45C	002D6FD8	Gfx_H3d_WriteSkinUniforms	skinned material uniforms (0x2C0), from 0x2EC920	replace	traced
+002F554C	002E00CC	Gfx_H3d_WriteSkinUniformsCached	the same, when the skin changed (0x2C0), from 0x2EC920	replace	traced
+002F5344	002DFEC4	Gfx_H3d_WriteFragmentState	from 0x2F3F64: fragment lighting toggle (0x1C4), then texture configuration (0x0E0, 0x0E1, through 0x2F3D38)	replace	traced
+002F3D38	002DE8B8	Gfx_H3d_WriteTexEnvConfig	texture environment configuration (0x0E0, 0x0E1)	replace	traced
+002F8248	002E2DC0	Gfx_H3d_WriteFragmentLightingConfig	fragment lighting configuration (0x144, 0x145)	replace	traced
+0032473C	0030F33C	Gfx_WriteCombinerStages	combiner stages 3-5 and the combiner buffer (0x0D8-0x0FD), from 0x323810	replace	traced
+004EE6C4	004B3ED8	Gfx_WriteUniformsFromModule	float uniforms (0x2C0-0x2C4), called from a module	replace	traced

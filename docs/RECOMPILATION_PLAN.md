@@ -576,18 +576,35 @@ full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResource
     uniforms itself;
   - the geometry shader: turned on by a BCH shader's own block; after it, `Gfx_H3d_BindShader` restores the default
     state (0x2F3ED8, and `Gfx_H3d_WriteDefaultState` 0x31A9D8: a fixed 0x170-byte block);
-  - `Gfx_H3d_BindLut` (0x2F8158): a lookup table per slot, only when changed; `Gfx_H3d_WriteSceneEnvironment`
-    (0x3085D8): fog, lights, each frame (skimmed only);
+  - `Gfx_H3d_BindLut` (0x2F8158): a lighting lookup table per slot (index 0x1C5), slot 0x17 the fog table
+    (0x0E6), only when changed; `Gfx_H3d_WriteRenderState` (0x3085D8): the draw's fixed-function state (culling,
+    fog, alpha, stencil, depth and colour masks), the lights through `Gfx_H3d_WriteLights` (0x319CF0); the camera
+    (`Gfx_H3d_WriteCamera` 0x2F415C: view and projection, to both shader units) only when it changed;
   - 0x1237BC and 0x123C78 are copies (24 bytes; unrolled); 0x1F8FD8 (named `Snd_VoiceParams_Init` by
     Pomegrade, doubtful) is called only by `Gfx_Shader_WriteProgramUpload` at a model's setup, never per frame:
     a helper of the shader upload, not a per-draw writer.
   For the renderer: a model's GPU state is data in its BCH (blocks of PICA200 registers), so the replacement of these
   functions reads the same blocks once, at load, into Vulkan pipelines and descriptor sets (the blocks are
   decoded, not run each frame), keyed by shader, mesh and material; per draw remain the uniforms and the draw.
-  With this, step 1 is done: `symbols/gfx_library.tsv` has 43 rows.
-- To read next: the 3D path above (their fields as `Gfx_BuildCommandList` and
-  the draw path read them), the BCH material's parameter block (Bch.h has its render state, inferred from 12,481
-  materials), and the shaders' records (SPICA's H3DShader: the program and its uniforms).
+- **Every author, checked (5 November, later).** `tools/gpu_map.py --copies` credits a word copied by a copy helper
+  to the function above that wrote what is copied. On the field trace (150 s), the authors of 90.6 % of the words
+  (the other 9.4 %: read straight from the RomFS, BCH command blocks used where they were loaded) are all in
+  `symbols/gfx_library.tsv` (93 rows, both games, every one identical code in X), down to 0.01 %. What changed:
+  - 30 % of the words each frame come from one list built once at start (`Gfx_BuildStartupList` 0x136B34 →
+    `Gfx_BuildShaderSetupList` 0x14AFA8: shader code, attribute configuration, uniforms) and submitted again: for
+    the renderer, pipelines and constants made once;
+  - the lists' life: `Gfx_CmdList_Finish` (0x1423A0) closes a list (flush, invalidate, end) and queues it to GSP;
+    `Gfx_CmdList_AddBuffer` (0x16DFE8) and `Gfx_CmdBuf_Call` (0x1F96C8) bring prebuilt buffers in, copied or
+    jumped to: the renderer's command buffers (secondary ones for prebuilt buffers);
+  - names corrected: 0x4BCD14 computes a 2D quad's texture coordinates (not lights), 0x15EB38 is a 64-byte copy (not
+    the camera: that is 0x2F415C), 0x1F8FD8 and 0x1F8070 write shader configuration at setup (Pomegrade's sound and
+    animation names were wrong or doubtful).
+  Not read line by line: 0x3085D8 and 0x319CF0 (their registers from the trace, their structure from the code), and
+  16 small authors known by their registers only. Which BCH shaders turn the geometry shader on is not known yet:
+  the shader translator (milestone 2) reads every BCH shader and will list them.
+  With this, step 1 is done.
+- Read with the renderer's code, against the functions above: the BCH material's parameter block (Bch.h has its
+  render state, inferred from 12,481 materials) and the shaders' records (SPICA's H3DShader), field by field.
 
 ### 11.2 Resources, made once
 

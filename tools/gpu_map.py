@@ -4,6 +4,11 @@
 GPU's command lists and those above them, and where the rest of the game calls into them.
 
   gpu_map.py <gpu trace.tsv> <calls.tsv> [--names function_names.tsv] [--depth 3] [--seconds 60] [--out map.tsv]
+             [--copies ADDR,ADDR...]
+
+--copies: copy helpers (memcpy, fixed-size copies): a word they write is credited to the first function of the
+trace's chain above them that is not one, the author of what is copied (the chain holds 4 functions: a word whose
+chain is copies only stays with the last).
 
 - writers: the functions the trace credits with command list words (written, or copied from the program's data: the
   copy's caller), with their share of the words;
@@ -25,6 +30,7 @@ def main():
     p.add_argument("--depth", type=int, default=3)
     p.add_argument("--seconds", type=float, default=60)
     p.add_argument("--out")
+    p.add_argument("--copies", default="")
     a = p.parse_args()
     names = {}
     if a.names:
@@ -33,6 +39,14 @@ def main():
                 f = line.rstrip("\n").split("\t")
                 if len(f) >= 2:
                     names[int(f[0], 16)] = f[1]
+    copies = {int(c, 16) for c in a.copies.split(",") if c}
+
+    def author(f):
+        chain = [int(x, 16) for x in f[1:5] if x != "-"]
+        for fn in chain:
+            if fn not in copies:
+                return fn
+        return chain[-1]
     share, fresh = collections.Counter(), collections.Counter()
     total = 0
     for line in open(a.trace):
@@ -40,10 +54,10 @@ def main():
             continue
         f = line.rstrip("\n").split("\t")
         if f[0] in ("write", "copy"):
-            share[int(f[1], 16)] += int(f[5])
+            share[author(f)] += int(f[5])
             total += int(f[5])
             if len(f) > 8 and f[8] != "-":
-                fresh[int(f[1], 16)] += int(f[8])
+                fresh[author(f)] += int(f[8])
         else:
             total += int(f[5])
     callers, callees = collections.defaultdict(collections.Counter), collections.defaultdict(collections.Counter)
