@@ -204,7 +204,7 @@ def main():
             else:  # (each file as it is, one after the other: what the matching compares does not depend on where)
                 vb_, at = at, (at + len(m.data) + 0xFFF) & ~0xFFF
                 raw.append((vb_, m.data))
-            units.append((name, vb_, m.data, mrows, frozenset(m.relocated), m))
+            units.append((name, vb_, m.data, mrows, {p: m.code_target.get(p) for p in m.relocated}, m))
     else:
         units.append((None, 0, code, rows, arm2c.static_relocations(a.cro) if a.cro else frozenset(), None))
     funcs, deps, why, reasons, thumb, name_of, starts = {}, {}, {}, {}, set(), {}, []

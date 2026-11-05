@@ -664,12 +664,18 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                     new.add(b)
                     b += 4
                 if not table and module and a + 8 in relocated:
-                    # a module's table the loader writes (its words 0 in the file, internal relocations): read from
-                    # memory when run, a computed jump (DllLangSelect's 00001C30)
+                    # a module's table the loader writes (its words 0 in the file, internal relocations): its targets
+                    # are the relocations' (relocated maps a place to the code offset it gets, when known: DllField's
+                    # 000A20AC), a switch like the .code's; else read from memory when run, a computed jump
+                    # (DllLangSelect's 00001C30)
+                    known = isinstance(relocated, dict)
                     while b < end and b in relocated:
                         new.add(b)
+                        t_ = relocated.get(b) if known else None
+                        table.append(t_ if t_ is not None and start <= t_ < end and t_ % 4 == 0 else None)
                         b += 4
-                    table = None
+                    if not table or None in table:
+                        table = None
                 sw[a] = table
         if new == data:
             break

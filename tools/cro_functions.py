@@ -59,6 +59,16 @@ class Module:
                 t = self.tag(struct.unpack_from("<I", self.data, self.h[table] + 12 * i)[0])
                 if t is not None:
                     self.relocated.add(t)
+        # what each internal relocation writes, when it points into the code segment: the file offset there (the
+        # segment's offset + the addend; 12-byte entries: the place's tag, the type, the symbol's segment, 2 bytes,
+        # the addend): a module's switch tables, 0 in the file, filled by the loader (DllField's 000A20AC)
+        self.code_target = {}
+        for i in range(self.h["InternalRelocationNum"]):
+            at = self.h["InternalRelocationTableOffset"] + 12 * i
+            raw, kind, segment, addend = struct.unpack_from("<IBB2xI", self.data, at)
+            t = self.tag(raw)
+            if t is not None and kind in (2, 38) and segment < len(self.segments) and self.segments[segment][2] == 0:
+                self.code_target[t] = self.segments[segment][0] + addend
 
     def tag(self, raw):
         index, offset = raw & 0xF, raw >> 4

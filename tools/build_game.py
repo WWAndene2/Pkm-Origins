@@ -77,7 +77,7 @@ def main():
             mt = {int(r[1], 16) for r in rows_ if r[3] == "thumb"}
             msize = {int(r[1], 16): int(r[4]) for r in rows_}
             mf, md, mw, mr, me = translate_program.translate_program(
-                m.data, 0, ms, msize, mt, frozenset(m.relocated), m.name, a.jobs)
+                m.data, 0, ms, msize, mt, {p: m.code_target.get(p) for p in m.relocated}, m.name, a.jobs)
             mt |= me
             # a branch before the module's file (data read as code, as a string after a function's last branch:
             # DllField's 00031FC0) has no C name: the function making it stays a stub, and so, in turn, does any
