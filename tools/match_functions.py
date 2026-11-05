@@ -195,7 +195,7 @@ def main():
                    "own code, 4 November)")
     p.add_argument("--untested", help="write the functions with no valid trial there: address, then why their trials "
                    "were rejected (the translated C's fault codes, src/hos/Cpu.h and arm2c.py, and how many trials each)")
-    p.add_argument("--replay", help="with --only: a regs.txt that src/hos/GpuTrace.c's $HOS_CAPTURE wrote at the "
+    p.add_argument("--replay", help="with --only, or --retest of one function: a regs.txt that src/hos/GpuTrace.c's $HOS_CAPTURE wrote at the "
                    "function's entry in a real run (its folder holds that moment's memory, given as --ram): the first "
                    "trial runs on those registers, the rest stay random")
     p.add_argument("--retest", help="a --untested file of an earlier run: only its functions are tested (all are still "
@@ -291,6 +291,8 @@ def main():
     replay = [int(x, 16) for x in open(a.replay).read().split()] if a.replay else None
     if a.retest:
         retest = {int(l.split("\t")[0], 16) for l in open(a.retest) if not l.startswith("#")}
+    # the function replayed: --only's, or with --retest (everything translated, for its indirect calls) its one function
+    replay_at = a.only if a.only else (min(retest) if retest and len(retest) == 1 else None)
     with_calls = sum(1 for s in funcs if deps[s])
     funcs = [(s, c, n) for s, (c, n) in sorted(funcs.items())]
     # --with-code: the .code translated too, compiled beside the module and found by call_indirect (the module's calls
@@ -531,7 +533,7 @@ def main():
                 # the rounding mode: the kernel's (toward zero) or the one the game sets at its start (to nearest)
                 fpscr = rng.choice((FPSCR, FPSCR_GAME))
                 sp = MB + MS - 0x100
-                if replay and s == a.only and trial == 0:  # the inputs the game gave it (sp on the game's own stack)
+                if replay and s == replay_at and trial == 0:  # the inputs the game gave it (sp on the game's own stack)
                     regs, sp = replay[:13], replay[13]
                     flags = (replay[16] << 3) | (replay[17] << 2) | (replay[18] << 1) | replay[19]
                     fregs, fpscr, fflags = replay[20:52], replay[52] & 0x0FFFFFFF, replay[52] >> 28
@@ -634,7 +636,7 @@ def main():
                 mismatched.append((s, bad))
             elif valid == 0:
                 untested.append((s, dict(rejected)))
-            if replay and s == a.only:
+            if replay and s == replay_at:
                 sys.stderr.write("replay of %08X: %s\n" % (s, "mismatch: " + bad if bad else "no valid trial" if valid == 0
                                                              else "matched (%d valid trials)" % valid))
             else:

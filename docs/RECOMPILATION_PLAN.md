@@ -374,6 +374,11 @@ Performance comes first in every design choice, the more so for the seamless co-
    DllStatus, DllBag, DllTrainerCase, DllReport; X: DllPokeList, DllStatus, DllZukan, DllBag, DllTrainerCase), each
    `--retest` pass on what the last left: Omega Ruby .code **22,570**, modules **29,561**; X .code **21,886**, modules
    **27,257**; **0 mismatched**. Still without a valid trial: 3,624, 12,210, 3,544, 11,308.
+   **The graphics library, all proven (5 November).** Of `symbols/gfx_library.tsv`'s 93 functions, 8 had no valid
+   trial (they take pointers to a BCH model's or a shader's structures: 0x1F8070, 0x2EC45C, 0x2F5DE8, 0x380B44,
+   0x396510, 0x4A7A34, 0x4A7C60, 0x4A7FB8). Their real inputs, recorded in our runtime on the way to the field
+   (`$HOS_CAPTURE` in the trace build: registers and memory at a function's first entry), replayed against the
+   original (`match_functions.py --replay`, the whole game translated for the indirect calls): **8 matched**.
    Step 3: `src/hos/` (kernel, threads, loader, IPC, srv, APT, ndm, cfg, ptm, frd, boss, fs (RomFS), hid, gsp with a
    null GPU) runs Omega Ruby's translated code natively (`game <extracted dir> <.3ds>`) to its **first GPU command list**
    (29,824 bytes submitted); its main thread's first 388 system calls equal Azahar's, in order
