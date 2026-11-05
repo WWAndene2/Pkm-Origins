@@ -28,4 +28,7 @@ void hos_cro_name(uint32_t m, char* out, size_t n);
 int hos_module_loaded(const char* name, uint32_t address);
 void hos_module_unloaded(uint32_t address);
 
+/* a loaded module's place as "<module>+<offset>" (service/Ldr.c); 0 if address is in none */
+int hos_ldr_place(uint32_t address, char* out, size_t n);
+
 #endif

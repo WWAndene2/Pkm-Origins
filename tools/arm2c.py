@@ -659,6 +659,13 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                     table.append(word(b))
                     new.add(b)
                     b += 4
+                if not table and module and a + 8 in relocated:
+                    # a module's table the loader writes (its words 0 in the file, internal relocations): read from
+                    # memory when run, a computed jump (DllLangSelect's 00001C30)
+                    while b < end and b in relocated:
+                        new.add(b)
+                        b += 4
+                    table = None
                 sw[a] = table
         if new == data:
             break
@@ -725,6 +732,9 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 line.append(exclusive(i, base_m))
             elif base_m == "nop":
                 pass
+            elif i.address in switches and switches[i.address] is None:  # (a table the loader writes)
+                idx = REG[i.reg_name(ops[1].mem.index)]
+                line.append(jump("ld32(c, %s + (c->r[%d] << 2))" % (ADDR(i.address + 8), idx)))
             elif i.address in switches:  # ldr pc, [pc, rN, lsl #2]: a switch over the table after it
                 table = switches[i.address]
                 idx = REG[i.reg_name(ops[1].mem.index)]

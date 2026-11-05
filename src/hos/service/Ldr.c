@@ -7,6 +7,7 @@
 #include "../Ipc.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../Cro.h"
@@ -15,6 +16,17 @@
 enum { MODULE_RO = 31 };
 
 static uint32_t crs; /* the static module's address, 0 before Initialize */
+static struct { char name[64]; uint32_t address, size; } loaded[64]; /* (for the stop messages: hos_ldr_place) */
+
+int hos_ldr_place(uint32_t address, char* out, size_t n)
+{
+    for (int i = 0; i < 64; i++)
+        if (loaded[i].size && address - loaded[i].address < loaded[i].size) {
+            snprintf(out, n, "%s+%X", loaded[i].name, address - loaded[i].address);
+            return 1;
+        }
+    return 0;
+}
 
 static void ok(HosRequest* q)
 {
@@ -66,6 +78,15 @@ static void load_cro(HosRequest* q, int bug_fix)
     }
     char name[64];
     hos_cro_name(address, name, sizeof name);
+    for (int i = 0; i < 64; i++)
+        if (!loaded[i].size) {
+            snprintf(loaded[i].name, sizeof loaded[i].name, "%s", name);
+            loaded[i].address = address;
+            loaded[i].size = fixed;
+            break;
+        }
+    if (getenv("HOS_TRACE_MODULES"))
+        fprintf(stderr, "hos: module %s loaded at %08X (%X bytes fixed)\n", name, address, fixed);
     if (!hos_module_loaded(name, address))
         fprintf(stderr, "hos: module %s loaded at %08X: not translated (its functions stop the game when called)\n",
                 name, address);
@@ -93,6 +114,9 @@ static void unload_cro(HosRequest* q)
         return;
     }
     hos_module_unloaded(address);
+    for (int i = 0; i < 64; i++)
+        if (loaded[i].size && loaded[i].address == address)
+            loaded[i].size = 0;
     memcpy(hos_pointer(buffer), hos_pointer(address), fixed);
     hos_memory_unmap(address, fixed);
     ok(q);

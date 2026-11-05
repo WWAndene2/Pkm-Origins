@@ -8,6 +8,7 @@
  * a second, and the 3DS's own timer interrupts are not instant either. Time is real (the host's monotonic clock).
  */
 #include "Kernel.h"
+#include "Cro.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -161,8 +162,12 @@ static void run(HosThread* t)
     c->r[14] = THREAD_RETURN;
     call_indirect(c, t->entry, THREAD_RETURN);
     if (c->fault) {
-        fprintf(stderr, "hos: thread %u stopped: fault %d at %08X (lr %08X, sp %08X)\n", t->id, c->fault, c->r[15],
-                c->r[14], c->r[13]);
+        char at[96] = "", from[96] = "";
+        hos_ldr_place(c->r[15], at, sizeof at);
+        hos_ldr_place(c->r[14], from, sizeof from);
+        fprintf(stderr, "hos: thread %u stopped: fault %d at %08X%s%s%s (lr %08X%s%s%s, sp %08X)\n", t->id, c->fault,
+                c->r[15], at[0] ? " (" : "", at, at[0] ? ")" : "", c->r[14], from[0] ? " " : "", from, "",
+                c->r[13]);
         if (c->fault != 100) /* (100: ExitThread, ExitProcess: a normal end) */
             fflush(stderr);
     }
