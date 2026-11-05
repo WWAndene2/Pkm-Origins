@@ -443,6 +443,13 @@ Performance comes first in every design choice, the more so for the seamless co-
    buffers built once by `Gfx_BuildCommandList`. So 0x4BE1E0 / 0x32430C are the general draw path, not sprites only:
    each object's matrices sent every frame, its prebuilt buffer resubmitted. New on the field: 0x19B76C and 0x19B6E8
    set geometry shader registers (to read: the PICA200's geometry shader has no Mali equivalent, §8.1).
+   Read (5 November): they are generic helpers writing a 4x4 / 3x4 matrix into a uniform upload command (components
+   reversed, as the PICA200 takes them), and every matrix goes both to the vertex shader's uniforms (0x2C1) and the
+   geometry shader unit's (0x291): the PICA200's fourth unit runs vertex shaders when no geometry shader is on, and is
+   given the same uniforms. The control registers' values over 150 s on the field ($HOS_GPU_TRACE_VALUES):
+   GPUREG_GEOSTAGE_CONFIG (0x229) 0 in 174,989 settings, 0x100 in 654, 2 (geometry shader on) in 120, set by
+   0x184020 alone (an effect, to identify). So nearly every draw needs no geometry shader; the rare one is to be
+   rewritten (vertex shader expansion or compute), not emulated, on Mali.
    `Gfx_BuildCommandList` (first reading): its list is a record (render state + 0x44) holding the command buffer
    (+0x10, words used +0x1C), a count of draw items (+4, +6) and the items at +0x28, 0x2C bytes each, each pointing
    (+0x28) at a draw record: its key (+8: the items sharing it are drawn together, the light and matrix commands

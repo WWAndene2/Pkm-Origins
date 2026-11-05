@@ -209,6 +209,39 @@ static void credit_register(uint32_t origin, uint32_t reg, int is_fresh)
         }
 }
 
+/* the values some control registers take ($HOS_GPU_TRACE_VALUES: registers in hex separated by commas, e.g. the
+   geometry shader's 229,244,252,289), counted by value */
+enum { VALUES = 4096 };
+static struct { uint32_t reg, value; unsigned long long count; } values[VALUES];
+static uint32_t watched[16];
+static int watched_count = -1;
+
+static void count_value(uint32_t reg, uint32_t value)
+{
+    if (watched_count < 0) {
+        const char* s = getenv("HOS_GPU_TRACE_VALUES");
+        watched_count = 0;
+        while (s && *s && watched_count < 16) {
+            char* e;
+            watched[watched_count++] = (uint32_t)strtoul(s, &e, 16);
+            s = *e == ',' ? e + 1 : e + strlen(e);
+        }
+    }
+    int w = 0;
+    for (int i = 0; i < watched_count; i++)
+        w |= watched[i] == reg;
+    if (!w)
+        return;
+    uint32_t h = ((reg * 2654435761u) ^ (value * 40503u)) % VALUES;
+    for (int n = 0; n < VALUES; n++, h = (h + 1) % VALUES)
+        if (!values[h].count || (values[h].reg == reg && values[h].value == value)) {
+            values[h].reg = reg;
+            values[h].value = value;
+            values[h].count++;
+            return;
+        }
+}
+
 static void read_commands(uint32_t address, uint32_t size)
 {
     uint32_t n = size / 4, i = 0;
@@ -217,7 +250,9 @@ static void read_commands(uint32_t address, uint32_t size)
         memcpy(&header, hos_pointer(address + 4 * (i + 1)), 4);
         uint32_t reg = header & 0xFFFF, extra = (header >> 20) & 0xFF, consecutive = header >> 31;
         for (uint32_t k = 0; k <= extra && i + (k ? k + 1 : 0) < n; k++) {
-            uint32_t at = address + 4 * (k ? i + 1 + k : i);
+            uint32_t at = address + 4 * (k ? i + 1 + k : i), value;
+            memcpy(&value, hos_pointer(at), 4);
+            count_value(consecutive ? reg + k : reg, value);
             o = origin_of(at);
             if (o && *o)
                 credit_register(*o, consecutive ? reg + k : reg, *epoch_at(o) + 32 >= (uint32_t)lists);
@@ -271,6 +306,9 @@ static void write_registers(void)
     FILE* f = path ? fopen(path, "w") : NULL;
     if (!f)
         return;
+    for (int i = 0; i < VALUES; i++)
+        if (values[i].count)
+            fprintf(f, "value\t-\t%03X\t%llu\t%08X\n", values[i].reg, values[i].count, values[i].value);
     fprintf(f, "# origin kind\twriter (a chain's first function) or RomFS read\tregister\tparameters\tof them fresh\n");
     for (int i = 0; i < REGS; i++)
         if (regs[i].words) {
