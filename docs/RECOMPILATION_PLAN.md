@@ -539,6 +539,12 @@ full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResource
   - per mesh (`Gfx_SetupMeshBuffers` 0x4BB450): its bones (100-byte records in the skeleton, a 0x30-byte 3x4 matrix
     each, `Gfx_ComputeBoneMatrices`), indexes and flags: skinned meshes' bone matrices computed by the game's code
     each frame and sent as uniforms.
+- **The list** (5 November): `symbols/gfx_library.tsv`, 31 functions in both games: 17 to replace, 6 whose records
+  the renderer reads (inputs), 7 helpers kept, 1 to read (0x184020, the geometry shader's one user). Of the mesh node,
+  known: its material (+0x104: a flag byte +8, shader flags +9, its draw records +0x10 / +0x14 / +0x18, +0x1C a layout
+  part), state block (+0xD4) and count (+0xFA), changed flag (+0xFE), built buffer (+0x100), layout positions (+0xD8,
+  +0xDC), its object constants (+0x48, +0x4C, matrix at +0x80), draw flags (+0xB3-0xB6); the rest is read when the
+  replacements are written, against the code.
 - To read next: the mesh node in full (their fields as `Gfx_BuildCommandList` and
   the draw path read them), the BCH material's parameter block (Bch.h has its render state, inferred from 12,481
   materials), and the shaders' records (SPICA's H3DShader: the program and its uniforms).
