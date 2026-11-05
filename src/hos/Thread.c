@@ -19,6 +19,8 @@
 pthread_mutex_t hos_lock = PTHREAD_MUTEX_INITIALIZER;
 HosThread* hos_current;
 
+static HosThread* all[512]; /* every thread made (for the state dump) */
+static int all_count;
 static HosThread* head[64];
 static HosThread* tail[64];
 static pthread_cond_t clock_cond = PTHREAD_COND_INITIALIZER;
@@ -205,6 +207,8 @@ HosThread* hos_thread_create(uint32_t entry, uint32_t arg, uint32_t stack_top, i
     t->object = hos_object_new(HOS_THREAD);
     t->object->thread = t;
     t->state = HOS_WAITING;
+    if (all_count < 512)
+        all[all_count++] = t;
     return t;
 }
 
@@ -257,13 +261,43 @@ void hos_clock_every(int64_t period_ns, void (*run)(void))
     }
 }
 
+/* every live thread's state and what it waits on, to stderr ($HOS_DUMP_AFTER seconds after the start: a run that
+   stops making progress) */
+static void dump_threads(void)
+{
+    static const char* states[4] = {"ready", "running", "waiting", "dead"};
+    static const char* kinds[11] = {"event", "mutex", "semaphore", "timer", "thread", "arbiter", "session", "port",
+                                    "memory block", "process", "resource limit"};
+    fprintf(stderr, "hos: threads (%d made):\n", all_count);
+    for (int i = 0; i < all_count; i++) {
+        HosThread* t = all[i];
+        if (t->state == HOS_DEAD)
+            continue;
+        fprintf(stderr, "  thread %u priority %d %s pc %08X lr %08X", t->id, t->priority, states[t->state],
+                t->cpu.r[15], t->cpu.r[14]);
+        for (int k = 0; k < t->wait_count; k++)
+            fprintf(stderr, " | waits on %s %s", kinds[t->waits[k]->kind], t->waits[k]->name);
+        if (t->arbiter)
+            fprintf(stderr, " | arbiter address %08X", t->arbiter_address);
+        if (t->deadline)
+            fprintf(stderr, " | with a timeout");
+        fprintf(stderr, "\n");
+    }
+}
+
 /* the clock thread: wakes the waits whose timeout passed and fires the timers due, then sleeps to the next one */
 static void* clock_main(void* p)
 {
     (void)p;
     pthread_mutex_lock(&hos_lock);
+    const char* d = getenv("HOS_DUMP_AFTER");
+    int64_t dump_at = d ? hos_now_ns() + (int64_t)(atof(d) * 1e9) : 0;
     for (;;) {
         int64_t now = hos_now_ns();
+        if (dump_at && now >= dump_at) {
+            dump_threads();
+            dump_at = 0;
+        }
         hos_timeouts_fire(now);
         hos_timers_fire(now);
         for (int i = 0; i < periodic_count; i++)

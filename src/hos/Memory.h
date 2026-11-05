@@ -25,6 +25,10 @@ int hos_memory_map(uint32_t address, uint32_t size);
 /* makes [address, address + size) unusable again */
 void hos_memory_unmap(uint32_t address, uint32_t size);
 
+/* [target, target + size) made the same bytes as [source, ...) (svc ControlMemory MAP); 0 on success; and undone */
+int hos_memory_alias(uint32_t target, uint32_t source, uint32_t size);
+void hos_memory_unalias(uint32_t target, uint32_t size);
+
 /* the memory the game has committed (its program, heap and linear heap allocations), for the resource limits */
 uint32_t hos_memory_committed(void);
 

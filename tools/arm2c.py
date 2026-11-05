@@ -704,7 +704,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         return ("{ uint32_t t = %s; switch (t - %s) { @CASES@ default: break; } call_indirect(c, t, ret); return; }" % (expr, ADDR(0)))
     body, targets, returned = [], set(), False
     unsupported = []  # the instructions with no C (a stop each)
-    for i in insns:
+    for k_, i in enumerate(insns):
+        prev = insns[k_ - 1] if k_ else None
         m = i.mnemonic
         base_m = m[:-2] if i.cc not in (0, 15) else m  # the condition suffix (bxne, addseq)
         base_m = base_m[:-1] if base_m.endswith("s") and i.update_flags else base_m
@@ -747,6 +748,14 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 # lr from the stack: X's 00205E20); otherwise fault 3, never a silent other path
                 line.append("if (c->r[14] != ret) { c->fault = 3; return; } return;")
                 returned = i.cc in (0, 15)
+            elif (base_m == "bx" and ops[0].type == ARM_OP_REG and not thumb and prev is not None
+                  and prev.mnemonic.startswith("ldr") and prev.operands[0].type == ARM_OP_REG
+                  and prev.operands[0].reg == ops[0].reg and prev.operands[1].type == ARM_OP_MEM
+                  and prev.operands[1].mem.index != 0):
+                # ldr rN, [rA, rB, lsl #2]; bx rN: a jump through a table of addresses, into this function as a rule
+                # (a threaded interpreter: the Pawn scripts' AMX at Omega Ruby's 00503DAC), a switch like the others
+                line.append(jump("c->r[%d]" % rd()).replace("call_indirect(c, t, ret)",
+                                                            "if (t == ret) return; call_indirect(c, t, ret)", 1))
             elif base_m == "bx" and ops[0].type == ARM_OP_REG:  # a jump through a register: the function it lands in returns
                 # for this one; to the address this function returns to, it is the return itself (lr popped into
                 # another register: pop {r3}; bx r3, Omega Ruby's 001028A6)

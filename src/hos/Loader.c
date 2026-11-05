@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/mman.h>
 
 #include "Kernel.h"
 #include "Memory.h"
@@ -57,6 +58,9 @@ int hos_load_program(const uint8_t* code, size_t code_size, const uint8_t* exhea
     committed += stack_size;
     /* the threads' local storage, the configuration page and the shared page */
     if (hos_memory_map(HOS_CONFIG, 0x2000) || hos_memory_map(HOS_TLS, 0x7E000))
+        return -1;
+    /* the VRAM (6 MB, Azahar's VRAM_VADDR): the GPU's DMAs and memory fills write there */
+    if (hos_memory_map(0x1F000000u, 0x600000))
         return -1;
     uint8_t* cfg = hos_pointer(HOS_CONFIG);
     unsigned mode = (flag0 >> 4) & 0xF;
@@ -125,11 +129,11 @@ void hos_update_time(void)
 }
 
 /* svc ControlMemory (Azahar's svc.cpp / process.cpp): operation 3 commits (maps) memory, the linear flag (0x10000)
-   in the linear heap at an address the kernel chooses, 1 frees it */
+   in the linear heap at an address the kernel chooses, 1 frees it, 4 shows memory at a second address, 5 undoes that,
+   6 changes its protection */
 HosResult hos_control_memory(uint32_t* out, uint32_t op, uint32_t addr0, uint32_t addr1, uint32_t size, uint32_t perm)
 {
     (void)addr1;
-    (void)perm;
     uint32_t kind = op & 0xFF;
     int linear = (op & 0x10000) != 0;
     size = (size + 0xFFFu) & ~0xFFFu;
@@ -153,6 +157,27 @@ HosResult hos_control_memory(uint32_t* out, uint32_t op, uint32_t addr0, uint32_
         hos_memory_unmap(addr0, size);
         committed -= size;
         *out = addr0;
+        return HOS_OK;
+    }
+    if (kind == 4) { /* map: addr0 shows addr1's bytes (Azahar's Process::Map) */
+        if (addr1 < HOS_HEAP || addr1 + size > HOS_STACK_END || addr1 - addr0 < size || addr0 - addr1 < size)
+            return HOS_ERR_INVALID_ADDRESS;
+        if (hos_memory_alias(addr0, addr1, size))
+            return HOS_ERR_OUT_OF_MEMORY;
+        *out = 0;
+        return HOS_OK;
+    }
+    if (kind == 5) { /* unmap such a view */
+        hos_memory_unalias(addr0, size);
+        *out = 0;
+        return HOS_OK;
+    }
+    if (kind == 6) { /* protect (Azahar: ReprotectRange): none, or readable (and writable: the host's translated code
+                        runs from no page, so execute changes nothing) */
+        uint32_t start = addr0 & ~0xFFFu, end = (addr0 + size + 0xFFFu) & ~0xFFFu;
+        if (mprotect(hos_memory + start, end - start, (perm & 3) ? PROT_READ | PROT_WRITE : PROT_NONE))
+            return HOS_ERR_INVALID_ADDRESS;
+        *out = 0;
         return HOS_OK;
     }
     fprintf(stderr, "hos: ControlMemory operation %X not done\n", op);
