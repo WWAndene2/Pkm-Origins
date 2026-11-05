@@ -729,8 +729,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 table = switches[i.address]
                 idx = REG[i.reg_name(ops[1].mem.index)]
                 targets.update(table)
-                line.append("switch (c->r[%d]) { %s default: c->fault = 5; return; }"
-                            % (idx, " ".join("case %d: goto L%X;" % (k, t) for k, t in enumerate(table))))
+                line.append("switch (c->r[%d]) { %s default: c->r[15] = %s; c->fault = 5; return; }"
+                            % (idx, " ".join("case %d: goto L%X;" % (k, t) for k, t in enumerate(table)), ADDR(i.address)))
             elif base_m == "bx" and i.reg_name(ops[0].reg) == "lr":
                 # the C returns to its caller: right only when lr is the address this function got (a shared epilogue pops
                 # lr from the stack: X's 00205E20); otherwise fault 3, never a silent other path
