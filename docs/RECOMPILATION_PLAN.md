@@ -525,7 +525,21 @@ full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResource
   of the file's format, once when a model loads (as SPICA does), to make the material's pipeline key and constants:
   a file format that happens to be PICA command words, not the game's GPU traffic translated each frame (decision 1
   holds).
-- To read next: the 0x174-byte material record and the mesh node in full (their fields as `Gfx_BuildCommandList` and
+- **A model instance's runtime records** (read, 5 November):
+  - per material, 0x174 bytes (`Gfx_Material_ParseUserData` 0x380B44): the six combiner stages' sources and operands
+    decoded into bytes (0x24 bytes a stage) from the BCH material's "PrivateMod" user data or its own combiner
+    words, and more of its render state: a writable copy of the fixed fragment stages, so the game can change a
+    material while it runs (material animation). For the renderer: a material's pipeline key can change at run time;
+    pipelines are cached by key, every key of the game's files built before play (decision 3), a new one in the
+    background.
+  - per material, 0x58 bytes of uniform locations found by name (`Gfx_BindStandardUniforms` 0x396510): `WrldMtx`,
+    `NormMtx`, `ProjMtx`, `ViewMtx`, `UnivReg`, `LightCt`, the hemisphere light `HslGCol`, `HslSCol`, `HslSDir`,
+    `MatAmbi`, `MatDiff`. These are what the per-frame functions write (the matrices of §10): the renderer's
+    per-frame uniform block, by the same names.
+  - per mesh (`Gfx_SetupMeshBuffers` 0x4BB450): its bones (100-byte records in the skeleton, a 0x30-byte 3x4 matrix
+    each, `Gfx_ComputeBoneMatrices`), indexes and flags: skinned meshes' bone matrices computed by the game's code
+    each frame and sent as uniforms.
+- To read next: the mesh node in full (their fields as `Gfx_BuildCommandList` and
   the draw path read them), the BCH material's parameter block (Bch.h has its render state, inferred from 12,481
   materials), and the shaders' records (SPICA's H3DShader: the program and its uniforms).
 
