@@ -737,8 +737,10 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 line.append("if (c->r[14] != ret) { c->fault = 3; return; } return;")
                 returned = i.cc in (0, 15)
             elif base_m == "bx" and ops[0].type == ARM_OP_REG:  # a jump through a register: the function it lands in returns
-                line.append("{ uint32_t t = c->r[%d]; call_indirect(c, t, ret); "
-                            "return; }" % rd())  # for this one
+                # for this one; to the address this function returns to, it is the return itself (lr popped into
+                # another register: pop {r3}; bx r3, Omega Ruby's 001028A6)
+                line.append("{ uint32_t t = c->r[%d]; if (t == ret) return; call_indirect(c, t, ret); "
+                            "return; }" % rd())
                 returned = i.cc in (0, 15)
             elif base_m == "blx" and ops[0].type == ARM_OP_REG:  # an indirect call (virtual methods, function pointers)
                 lr = (i.address + i.size) | thumb
