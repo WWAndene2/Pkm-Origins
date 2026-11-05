@@ -550,9 +550,14 @@ later, on matched code: widescreen, 60 fps (interpolation), better shadows and e
    over 30 minutes, pipelines built in play: none).
 5. X the same way (the same library).
 
-### 11.8 For the owner to decide
+### 11.8 The owner's decisions (5 November)
 
-1. The replaced level: the library's functions (11.1, recommended: what the owner chose on 5 November), or one level
-   higher (the scene's nodes), which saves more work each frame but means decompiling more of the engine first.
-2. Texture recompression on phones (ASTC, smaller and faster) or the 3DS's textures decoded as is (exact).
-3. Where the shader translation runs: when installing (a wait once, recommended) or in the background while playing.
+1. **The highest level, for full control.** One renderer of our own (meshes, materials, textures, pipelines, passes:
+   every optimisation there), plugged into the game first at the graphics library's functions (11.1: already traced,
+   a first image soon and a reference to check against), then plugged higher, to the scene's nodes and the engine
+   itself, as their code is decompiled. Not two renderers: the same one, its entry point moving up.
+2. **The best fidelity and quality.** ETC1 textures (most of the 3DS's) given to the GPU as ETC2, which reads ETC1
+   data unchanged (inferred, to check against Pomegrade's decoder): exact and still compressed; the other formats
+   decoded exactly to RGBA8; high-quality ASTC / BC7 only for texture packs and later improvements, as options.
+3. **Both.** Every shader and pipeline of the game's files made when installing (no stutter from the start); anything
+   later (mods, packs) in the background, a general shader drawing meanwhile.
