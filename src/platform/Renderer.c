@@ -9,6 +9,7 @@
 #include "PicaFragment.h"
 #include "PicaRegs.h"
 #include "PicaVertex.h"
+#include "VulkanRenderer.h"
 #include <math.h>
 
 extern uint8_t* hos_memory;
@@ -87,6 +88,10 @@ static void on_draw(PicaState* s, int indexed, void* user)
 {
     (void)user;
     save_fragment(s);
+    if (!vk_renderer_init()) { /* drawing ($HOS_RENDER_DIR): the census skipped */
+        vk_renderer_draw(s, indexed);
+        return;
+    }
     static PicaVertex verts[1 << 16];
     const long n = pica_vertex_draw(s, indexed, verts, 1 << 16);
     if (n < 0)
@@ -141,7 +146,7 @@ void renderer_submit_list(uint32_t address, uint32_t size)
 {
     if (!ready) {
         const char* path = getenv("HOS_DRAW_STATS");
-        if (!path && !getenv("HOS_FRAGMENT_DIR"))
+        if (!path && !getenv("HOS_FRAGMENT_DIR") && !getenv("HOS_RENDER_DIR"))
             return;
         stats = path ? fopen(path, "w") : NULL;
         pica_state_init(&state, on_draw, physical, NULL);
@@ -159,4 +164,16 @@ void renderer_report(void)
     for (int k = 0; k < KEYS && census[k].key[0]; k++)
         fprintf(stats, "%s\t%llu\n", census[k].key, census[k].draws);
     fclose(stats);
+}
+
+void renderer_display(uint32_t source)
+{
+    /* the game's virtual address as the GPU's physical one: VRAM 0x1F000000 -> 0x18000000, linear heap 0x14000000 ->
+       FCRAM 0x20000000 */
+    uint32_t physical_address = source;
+    if (source >= 0x1F000000u && source < 0x1F600000u)
+        physical_address = source - 0x07000000u;
+    else if (source >= 0x14000000u && source < 0x1C000000u)
+        physical_address = source + 0x0C000000u;
+    vk_renderer_display(physical_address);
 }

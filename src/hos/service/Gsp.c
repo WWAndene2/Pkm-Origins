@@ -173,7 +173,10 @@ static void trigger_cmd_req_queue(HosRequest* q)
             if (w[4])
                 signal(PSC1);
             break;
-        case 3: /* DisplayTransfer */
+        case 3: /* DisplayTransfer: input, output, sizes, flags */
+            renderer_display(w[1]);
+            signal(PPF);
+            break;
         case 4: /* TextureCopy */
             signal(PPF);
             break;

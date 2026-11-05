@@ -14,6 +14,9 @@
 /* a command list at virtual address address, size bytes (GSP's SubmitCmdList) */
 void renderer_submit_list(uint32_t address, uint32_t size);
 
+/* a display transfer (GSP's copy of a framebuffer to a screen) from virtual address source */
+void renderer_display(uint32_t source);
+
 /* at exit: the census, if asked */
 void renderer_report(void);
 
