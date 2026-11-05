@@ -485,6 +485,26 @@ To read before the first line of renderer code: the material record and state bl
 full, how a BCH's meshes, materials and shaders become nodes (`Gfx_ModelResourceSetup` 0x31FC24,
 `Gfx_CreateModelInstance` 0x39A084 and around), and the one geometry shader user (0x184020).
 
+**Step 1's first reads (5 November; Ghidra, Pomegrade's names, roles read from the code):**
+- A model is its BCH file used in place: `Gfx_ModelResourceSetup` (0x31FC24) checks the header (magic, the
+  compatibility byte at most 0x21, the revision at least 0x21, the 16-byte and 128-byte alignments, "already set up"
+  bit 1 at +0x40), applies the file's relocation table (`Sys_ApplyRelocations`: offsets made addresses), keeps the
+  header and data addresses, sets up the materials' uniforms (`Gfx_SetupMaterialUniforms` 0x31F808), and marks the
+  file set up. So the meshes, materials, shaders and textures the library reads are the BCH's own records, as SPICA
+  lays them out (Pomegrade's Bch.cpp reads them: meshes, sub-meshes, materials, texture names; not yet skeletons,
+  animations, shaders, lights, cameras). The renderer can read the same records in the same place: no copy.
+- A model instance (`Gfx_CreateModelInstance` 0x39A084, 510 lines) allocates beside it: the sizes from
+  `Gfx_ComputeModelBufferSizes`, the meshes' buffers (`Gfx_SetupMeshBuffers`), a visibility bit array, animation
+  channels, and one 0x174-byte runtime record per material (instance + 0x1B words: + 0x6C, filled by
+  `Gfx_Material_ParseUserData` from the BCH material's user data), then `Gfx_BindStandardUniforms` per material.
+- Textures: the 3DS's ETC1 blocks are 4x4 blocks in 8x8 tiles, each 64-bit block stored little-endian with red and
+  blue in each other's places (Pomegrade's PicaTexture.cpp, decoding them): given to the GPU as ETC2 after the blocks
+  are reordered and byte-swapped and read with red and blue swizzled (no pixel recomputed: decision 2 holds, seen in
+  the decoder, not yet tried on a GPU). ETC1A4 (its 4-bit alpha apart) is decoded to RGBA8.
+- To read next: the 0x174-byte material record and the mesh node in full (their fields as `Gfx_BuildCommandList` and
+  the draw path read them), the BCH material's parameter block (Bch.h has its render state, inferred from 12,481
+  materials), and the shaders' records (SPICA's H3DShader: the program and its uniforms).
+
 ### 11.2 Resources, made once
 
 - **Vertex and index buffers**: the game's own, in its linear heap (seen: the command lists point there). Uploaded to
