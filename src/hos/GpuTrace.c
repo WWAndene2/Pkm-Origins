@@ -190,6 +190,42 @@ void hos_gpu_trace_file(uint32_t address, uint32_t length, uint64_t offset)
     }
 }
 
+/* the GPU registers each writer's words set: the list read as the PICA200 reads it (3dbrew's GPU/Internal Registers:
+   a parameter, then its header: register id 0-15, byte mask 16-19, extra parameters 20-27, consecutive registers 31;
+   the extra parameters after it; each command padded to 8 bytes), each parameter credited to its word's origin */
+enum { REGS = 1 << 16 };
+static struct { uint32_t origin, reg; unsigned long long words, fresh; } regs[REGS];
+
+static void credit_register(uint32_t origin, uint32_t reg, int is_fresh)
+{
+    uint32_t h = ((origin * 2654435761u) ^ (reg * 40503u)) >> 16;
+    for (int n = 0; n < REGS; n++, h = (h + 1) % REGS)
+        if (!regs[h].words || (regs[h].origin == origin && regs[h].reg == reg)) {
+            regs[h].origin = origin;
+            regs[h].reg = reg;
+            regs[h].words++;
+            regs[h].fresh += is_fresh;
+            return;
+        }
+}
+
+static void read_commands(uint32_t address, uint32_t size)
+{
+    uint32_t n = size / 4, i = 0;
+    while (i + 1 < n) {
+        uint32_t header, *o;
+        memcpy(&header, hos_pointer(address + 4 * (i + 1)), 4);
+        uint32_t reg = header & 0xFFFF, extra = (header >> 20) & 0xFF, consecutive = header >> 31;
+        for (uint32_t k = 0; k <= extra && i + (k ? k + 1 : 0) < n; k++) {
+            uint32_t at = address + 4 * (k ? i + 1 + k : i);
+            o = origin_of(at);
+            if (o && *o)
+                credit_register(*o, consecutive ? reg + k : reg, *epoch_at(o) + 32 >= (uint32_t)lists);
+        }
+        i += 2 + extra + (extra & 1);
+    }
+}
+
 void hos_gpu_trace_list(uint32_t address, uint32_t size)
 {
     lists++;
@@ -224,13 +260,35 @@ void hos_gpu_trace_list(uint32_t address, uint32_t size)
             }
         }
     }
+    read_commands(address, size);
     if (lists <= 16 || !(lists % 256))
         hos_gpu_trace_write(); /* (also early: a run can stop before the GSP's first report) */
+}
+
+static void write_registers(void)
+{
+    const char* path = getenv("HOS_GPU_TRACE_REGS");
+    FILE* f = path ? fopen(path, "w") : NULL;
+    if (!f)
+        return;
+    fprintf(f, "# origin kind\twriter (a chain's first function) or RomFS read\tregister\tparameters\tof them fresh\n");
+    for (int i = 0; i < REGS; i++)
+        if (regs[i].words) {
+            uint32_t o = regs[i].origin;
+            if (o & FROM_READ)
+                fprintf(f, "romfs\t%010llX\t%03X\t%llu\t%llu\n", (unsigned long long)reads[o & ~FROM_READ].offset,
+                        regs[i].reg, regs[i].words, regs[i].fresh);
+            else
+                fprintf(f, "%s\t%08X\t%03X\t%llu\t%llu\n", o & FROM_COPY ? "copy" : "write",
+                        table[(o & ~FROM_COPY) - 1].fn[0], regs[i].reg, regs[i].words, regs[i].fresh);
+        }
+    fclose(f);
 }
 
 void hos_gpu_trace_write(void)
 {
     write_edges();
+    write_registers();
     const char* path = getenv("HOS_GPU_TRACE");
     FILE* f = path ? fopen(path, "w") : NULL;
     if (!f)

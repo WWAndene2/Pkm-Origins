@@ -399,3 +399,19 @@ Performance comes first in every design choice, the more so for the seamless co-
    each frame, by 0x32430C, 0x323D98, 0x144CA8, 0x13EA34, 0x123888, 0x4BE1E0 (called from 0x152888, the main loop),
    0x32403C, 0x323810. For the renderer: the scene's command buffers can be turned into Vulkan objects once, when
    built; only the per-frame part (the functions above: matrices, uniforms, to read next) runs in every frame.
+   **What each sets** (the lists read as the GPU reads them, each parameter credited to its word's origin,
+   $HOS_GPU_TRACE_REGS; register groups from 3dbrew), Omega Ruby's title, share of the command parameters:
+   | Function | Share | Built | GPU registers it sets |
+   |---|---|---|---|
+   | `Gfx_BuildCommandList` 0x33899C | 36.0 % | once | vertex shader float uniforms 94 % (the materials' constants), textures 5 % |
+   | 0x300B28 copies (program data) | 17.7 % | once | vertex attribute layout 62 %, shader code / flags 17 % |
+   | RomFS file at 0x5B71C0F0 | 8.9 % | once | vertex shader code 100 %: the shader binary, uploaded as is |
+   | 0x14AFA8 | 5.0 % | once | uniform indexes, rasterizer, attributes |
+   | `Gfx_FlushLightAndMatrixCommands` 0x33917C | 5.6 % | once | geometry pipeline, draw, uniforms |
+   | 0x144CA8, 0x4BE1E0, 0x32403C, 0x4BCD14, 0x15EB38 | 11.2 % | each frame | vertex shader float uniforms: matrices |
+   | 0x323D98 | 2.4 % | each frame | textures 93 % |
+   | 0x32430C | 3.4 % | each frame | the draw calls (geometry pipeline, draw) and uniforms |
+   | 0x13EA34, 0x123888 | 3.0 % | each frame | rasterizer (viewport), output (framebuffer, blending) |
+   So the vertex shaders come from the game's files (step 4: translated once to SPIR-V, as §8 planned), the
+   materials and vertex layouts are built once per scene, and each frame sets matrices, textures, the framebuffer
+   and draws. Next: what these per-frame functions are given (objects, cameras), read from their code.
