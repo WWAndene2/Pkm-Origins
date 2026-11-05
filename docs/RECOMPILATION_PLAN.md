@@ -392,3 +392,10 @@ Performance comes first in every design choice, the more so for the seamless co-
    addresses and byte-identical (symbols/shared_functions.tsv): `Gfx_BuildCommandList` (X 0x323420, 33.4 %),
    `Gfx_FlushLightAndMatrixCommands` (0x323C00, 17.2 %), 0x14B984 (Omega Ruby's 0x14AFA8). One graphics library for
    both games, as step 4 hoped: reimplemented once.
+   **Built once, or each frame** (5 November: each word's store time kept through the copies, `gpu_map.py`): at
+   Omega Ruby's title, 73 % of the words submitted were built earlier and are copied into each frame's lists (all of
+   `Gfx_BuildCommandList`'s and `Gfx_FlushLightAndMatrixCommands`' words, entered once in 60 s: their buffers are
+   built when the scene loads, as are 0x14AFA8's and the program's templates copied by 0x300B28); 27 % are built
+   each frame, by 0x32430C, 0x323D98, 0x144CA8, 0x13EA34, 0x123888, 0x4BE1E0 (called from 0x152888, the main loop),
+   0x32403C, 0x323810. For the renderer: the scene's command buffers can be turned into Vulkan objects once, when
+   built; only the per-frame part (the functions above: matrices, uniforms, to read next) runs in every frame.

@@ -33,7 +33,7 @@ def main():
                 f = line.rstrip("\n").split("\t")
                 if len(f) >= 2:
                     names[int(f[0], 16)] = f[1]
-    share = collections.Counter()
+    share, fresh = collections.Counter(), collections.Counter()
     total = 0
     for line in open(a.trace):
         if line.startswith("#"):
@@ -42,6 +42,8 @@ def main():
         if f[0] in ("write", "copy"):
             share[int(f[1], 16)] += int(f[5])
             total += int(f[5])
+            if len(f) > 8 and f[8] != "-":
+                fresh[int(f[1], 16)] += int(f[8])
         else:
             total += int(f[5])
     callers, callees = collections.defaultdict(collections.Counter), collections.defaultdict(collections.Counter)
@@ -70,9 +72,12 @@ def main():
     rate = lambda n: n / a.seconds
     print("writers: %d (%d words); the library to %d calls above: %d functions; entries from outside: %d"
           % (len(share), total, a.depth, len(library), len(entries)))
-    print("the writers by their share of the words:")
+    print("words written in the last 32 lists (built each frame): %.1f%%; the rest built earlier and submitted again"
+          % (100 * sum(fresh.values()) / total))
+    print("the writers by their share of the words (and of those, built each frame):")
     for f, n in share.most_common(15):
-        print("  %08X %5.1f%%  %8.0f calls/s  %s" % (f, 100 * n / total, rate(calls[f]), names.get(f, "")))
+        print("  %08X %5.1f%% (%5.1f%% each frame) %8.0f calls/s  %s" % (f, 100 * n / total, 100 * fresh[f] / total,
+                                                                         rate(calls[f]), names.get(f, "")))
     print("the entries by calls a second (the callers outside the library):")
     for f in sorted(entries, key=lambda f: -sum(entries[f].values()))[:25]:
         out = ", ".join("%08X" % c for c, _ in sorted(entries[f].items(), key=lambda kv: -kv[1])[:3])
@@ -80,12 +85,12 @@ def main():
                                                                   names.get(f, ""), out))
     if a.out:
         with open(a.out, "w") as o:
-            o.write("# address\tlevel (0: writes command words)\tshare of the words %\tcalls a second\tentry (called "
-                    "from outside)\tname (Pomegrade)\n")
+            o.write("# address\tlevel (0: writes command words)\tshare of the words %\tof them built each frame %"
+                    "\tcalls a second\tentry (called from outside)\tname (Pomegrade)\n")
             for f in sorted(library, key=lambda f: (level[f], f)):
-                o.write("%08X\t%d\t%.2f\t%.0f\t%s\t%s\n" % (f, level[f], 100 * share[f] / total if total else 0,
-                                                            rate(calls[f]), "yes" if f in entries else "",
-                                                            names.get(f, "")))
+                o.write("%08X\t%d\t%.2f\t%.2f\t%.0f\t%s\t%s\n" % (
+                    f, level[f], 100 * share[f] / total if total else 0, 100 * fresh[f] / total if total else 0,
+                    rate(calls[f]), "yes" if f in entries else "", names.get(f, "")))
 
 
 if __name__ == "__main__":

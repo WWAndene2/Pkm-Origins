@@ -26,14 +26,17 @@ enum { SPAN = 0x08000000u, TABLE = 1 << 16, READS = 1 << 20, FRAMES = 4 };
 enum { FROM_READ = 0x80000000u, FROM_COPY = 0x40000000u }; /* (an origin: a chain's index + 1, or one of these) */
 
 static uint32_t* shadow[3]; /* the heap's, the linear heap's and the program's (its data, bss, modules) words' origins */
+static uint32_t* epoch[3];  /* and when each was stored: the number of lists submitted by then */
 static struct {
     uint32_t fn[FRAMES];
     unsigned long long words, lists, copied; /* copied: of the words, those a copy took from outside the heaps */
+    unsigned long long fresh;                /* of the words, those stored since the list before was submitted */
     uint32_t last, from_lo, from_hi;         /* (and the addresses it took them from) */
 } table[TABLE];
 static struct { uint64_t offset; uint32_t address, length; unsigned long long words; } reads[READS];
 static uint32_t read_count;
-static unsigned long long lists, words, unknown, outside;
+static unsigned long long words, unknown, outside;
+static unsigned long long ages[5]; /* the words submitted, by their age in lists: <2, <8, <32, <256, more */
 static uint32_t copies[16];
 static int copy_count = -1;
 static __thread uint32_t queue[64];
@@ -45,9 +48,21 @@ static uint32_t* origin_of(uint32_t a)
     int k = a - base[0] < SPAN ? 0 : a - base[1] < SPAN ? 1 : a - base[2] < 0x04000000u ? 2 : -1;
     if (k < 0)
         return NULL;
-    if (!shadow[k] && !(shadow[k] = calloc((k == 2 ? 0x04000000u : SPAN) / 4, 4)))
+    if (!shadow[k] && (!(shadow[k] = calloc((k == 2 ? 0x04000000u : SPAN) / 4, 4)) ||
+                       !(epoch[k] = calloc((k == 2 ? 0x04000000u : SPAN) / 4, 4))))
         return NULL;
     return &shadow[k][(a - base[k]) / 4];
+}
+
+static unsigned long long lists;
+
+/* the epoch beside an origin */
+static uint32_t* epoch_at(uint32_t* o)
+{
+    for (int k = 0; k < 3; k++)
+        if (shadow[k] && o >= shadow[k] && o < shadow[k] + (k == 2 ? 0x04000000u : SPAN) / 4)
+            return &epoch[k][o - shadow[k]];
+    return NULL;
 }
 
 static int in_copy(void)
@@ -90,8 +105,12 @@ static uint32_t chain_here(int skip)
 enum { EDGES = 1 << 20 };
 static struct { uint32_t from, to; unsigned long long count; } edges[EDGES];
 
+static int max_depth;
+
 void hos_gpu_trace_call(uint32_t to)
 {
+    if (hos_fn_depth > max_depth)
+        max_depth = hos_fn_depth;
     uint32_t from = hos_fn_depth > 0 && hos_fn_depth <= 8192 ? hos_fn_stack[hos_fn_depth - 1] : 0;
     uint32_t h = ((from * 2654435761u) ^ (to * 40503u)) >> 12;
     for (int n = 0; n < EDGES; n++, h = (h + 1) % EDGES) {
@@ -110,7 +129,7 @@ static void write_edges(void)
     FILE* f = path ? fopen(path, "w") : NULL;
     if (!f)
         return;
-    fprintf(f, "# lists %llu\n# caller\tcallee\tcalls\n", lists);
+    fprintf(f, "# lists %llu, the deepest call stack %d\n# caller\tcallee\tcalls\n", lists, max_depth);
     for (int i = 0; i < EDGES; i++)
         if (edges[i].count)
             fprintf(f, "%08X\t%08X\t%llu\n", edges[i].from, edges[i].to, edges[i].count);
@@ -131,6 +150,8 @@ void hos_gpu_trace_store(uint32_t a)
     if (in_copy()) {
         uint32_t from = head != tail ? queue[tail++ % 64] : 0;
         uint32_t* s = from ? origin_of(from) : NULL;
+        if (o) /* (a copied word keeps when its source was stored: its age is the data's, not the copy's) */
+            *epoch_at(o) = s && *s ? *epoch_at(s) : (uint32_t)lists;
         if (o && s && *s)
             *o = *s;
         else if (o) { /* (a source outside the heaps: the caller of the copy, and where it copied from) */
@@ -146,8 +167,10 @@ void hos_gpu_trace_store(uint32_t a)
         return;
     }
     head = tail = 0;
-    if (o)
+    if (o) {
         *o = chain_here(0);
+        *epoch_at(o) = (uint32_t)lists;
+    }
 }
 
 void hos_gpu_trace_file(uint32_t address, uint32_t length, uint64_t offset)
@@ -160,8 +183,10 @@ void hos_gpu_trace_file(uint32_t address, uint32_t length, uint64_t offset)
     reads[r].length = length;
     for (uint32_t k = 0; k < length; k += 4) {
         uint32_t* o = origin_of(address + k);
-        if (o)
+        if (o) {
             *o = FROM_READ | r;
+            *epoch_at(o) = (uint32_t)lists;
+        }
     }
 }
 
@@ -175,6 +200,13 @@ void hos_gpu_trace_list(uint32_t address, uint32_t size)
     for (uint32_t k = 0; k < size; k += 4) {
         uint32_t* o = origin_of(address + k);
         uint32_t id = o ? *o : 0;
+        /* fresh: stored in the last 32 lists (about 6 frames at the title's 5 lists a frame); older words were built
+           earlier and are submitted again */
+        int is_fresh = o && *epoch_at(o) + 32 >= (uint32_t)lists;
+        if (o) {
+            uint32_t age = (uint32_t)lists - *epoch_at(o);
+            ages[age < 2 ? 0 : age < 8 ? 1 : age < 32 ? 2 : age < 256 ? 3 : 4]++;
+        }
         words++;
         if (!id) {
             unknown++;
@@ -183,6 +215,7 @@ void hos_gpu_trace_list(uint32_t address, uint32_t size)
         } else {
             uint32_t h = (id & ~FROM_COPY) - 1;
             table[h].words += 1;
+            table[h].fresh += is_fresh;
             if (id & FROM_COPY)
                 table[h].copied++;
             if (table[h].last != lists) {
@@ -204,20 +237,22 @@ void hos_gpu_trace_write(void)
         return;
     fprintf(f, "# lists %llu, words %llu, of no known origin %llu, lists outside the linear heap %llu\n", lists, words,
             unknown, outside);
+    fprintf(f, "# words by age (lists since stored): <2 %llu, <8 %llu, <32 %llu, <256 %llu, older %llu\n", ages[0],
+            ages[1], ages[2], ages[3], ages[4]);
     fprintf(f, "# kind\twriter, or copy's caller (or RomFS offset)\tits caller (or length)\tthat one's\tand its\twords"
-               "\tlists\tcopied from\n");
+               "\tlists\tcopied from\tstored fresh (in the last 32 lists; the rest: built earlier, submitted again)\n");
     for (int i = 0; i < TABLE; i++) {
         if (table[i].words > table[i].copied)
-            fprintf(f, "write\t%08X\t%08X\t%08X\t%08X\t%llu\t%llu\t-\n", table[i].fn[0], table[i].fn[1],
-                    table[i].fn[2], table[i].fn[3], table[i].words - table[i].copied, table[i].lists);
+            fprintf(f, "write\t%08X\t%08X\t%08X\t%08X\t%llu\t%llu\t-\t%llu\n", table[i].fn[0], table[i].fn[1],
+                    table[i].fn[2], table[i].fn[3], table[i].words - table[i].copied, table[i].lists, table[i].fresh);
         if (table[i].copied)
-            fprintf(f, "copy\t%08X\t%08X\t%08X\t%08X\t%llu\t%llu\t%08X-%08X\n", table[i].fn[0], table[i].fn[1],
+            fprintf(f, "copy\t%08X\t%08X\t%08X\t%08X\t%llu\t%llu\t%08X-%08X\t-\n", table[i].fn[0], table[i].fn[1],
                     table[i].fn[2], table[i].fn[3], table[i].copied, table[i].lists, table[i].from_lo,
                     table[i].from_hi);
     }
     for (uint32_t r = 0; r < read_count; r++)
         if (reads[r].words)
-            fprintf(f, "romfs\t%010llX\t%X\t-\t-\t%llu\t-\t-\n", (unsigned long long)reads[r].offset, reads[r].length,
+            fprintf(f, "romfs\t%010llX\t%X\t-\t-\t%llu\t-\t-\t-\n", (unsigned long long)reads[r].offset, reads[r].length,
                     reads[r].words);
     fclose(f);
 }
