@@ -42,20 +42,29 @@ def main():
     p.add_argument("--out")
     p.add_argument("--diff-out")
     p.add_argument("--step", type=int, default=4, help="every n-th frame of ours searched (speed)")
+    p.add_argument("--ordered", action="store_true",
+                   help="the shots in time order (as given): each matched at or after the previous one's frame, within"
+                        " --window frames (a scene whose objects come and go otherwise matches a moment without them)")
+    p.add_argument("--window", type=int, default=400, help="with --ordered: frames of ours searched after the last")
     a = p.parse_args()
     ours = sorted(glob.glob(os.path.join(a.ours, "frame_*_%s.ppm" % a.address)))
     small = [(f, screen_view(f).resize((100, 60))) for f in ours[::a.step]]
     rows = []
+    after = 0
     for shot in a.shots:
         ref = Image.open(shot).convert("RGB").crop((0, 0, 400, 240))
         ref_small = ref.resize((100, 60))
-        best = min(small, key=lambda fs: difference(ref_small, fs[1])[0])
+        pool = small
+        if a.ordered:
+            pool = [fs for fs in small if after <= ours.index(fs[0]) < after + a.window] or small
+        best = min(pool, key=lambda fs: difference(ref_small, fs[1])[0])
         # then the frames around it at full size: the closest one (a frame apart moves what sways)
         at = ours.index(best[0])
         around = ours[max(0, at - a.step - 2):at + a.step + 3]
         scored = [(f, screen_view(f)) for f in around]
         best_full = min(scored, key=lambda fm: difference(ref, fm[1])[0])
         best = (best_full[0], None)
+        after = ours.index(best_full[0])
         mine = best_full[1]
         mean, big, d = difference(ref, mine)
         rows.append((shot, best[0], mean, big, ref, mine, d))
