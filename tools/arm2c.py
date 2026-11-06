@@ -734,6 +734,41 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 return None
         return None
 
+    def table_entries(k):
+        """add pc, rX, rB after ldr rX, [rB, rI, lsl #2] and rB set from pc (add / sub rB, pc, #n): a table of offsets
+        from rB, in the code (ORAS's video decoder: 001BCE20-28, 001BC948-50). Its targets are entries, which
+        call_indirect finds: the table's words read from rB while they land on code near (within 64 KB, word-aligned),
+        at most 64 of them"""
+        i = insns[k]
+        o = i.operands
+        if len(o) != 3 or o[2].type != ARM_OP_REG or entries is None:
+            return
+        rx, rb = o[1].reg, o[2].reg
+        base_ = None
+        loaded = False
+        for j in range(k - 1, max(-1, k - 6), -1):
+            p = insns[j]
+            po = p.operands
+            if p.mnemonic == "ldr" and po[0].reg == rx and po[1].type == ARM_OP_MEM and po[1].mem.base == rb \
+                    and po[1].mem.index != 0:
+                loaded = True
+            elif p.mnemonic[:3] in ("add", "sub") and len(po) == 3 and po[0].type == ARM_OP_REG and po[0].reg == rb \
+                    and po[1].type == ARM_OP_REG and p.reg_name(po[1].reg) == "pc" and po[2].type == ARM_OP_IMM:
+                base_ = (pc_of(p.address) + (po[2].imm if p.mnemonic.startswith("add") else -po[2].imm)) & 0xFFFFFFFF
+                break
+        if not loaded or base_ is None:
+            return
+        for n in range(64):
+            try:
+                t = (base_ + word(base_ + 4 * n)) & 0xFFFFFFFF
+            except struct.error:
+                break
+            if t & 3 or abs(t - i.address) > 0x10000:
+                break
+            if not is_start(t, False):
+                entries.add(t)
+            callees.add(t)
+
     def go_on_at(back):
         """the C that goes on at back after a call made by hand: a label of this function, or an entry of its own"""
         if start <= back < end_code:
@@ -1050,6 +1085,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 if flags:
                     line.append(" c->n = v >> 31; c->z = v == 0;")
                 if to_pc:
+                    table_entries(k_)
                     line.append(" %s" % jump("v"))
                     returned = i.cc in (0, 15)
                 elif not compare:
