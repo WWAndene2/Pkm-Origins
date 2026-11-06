@@ -8,7 +8,6 @@ affichage, données) · `2` gros chantier (de grandes parties du jeu à comprend
 nouveaux modèles, animations, sons ou textes à créer · `3 serveur` demande des serveurs en ligne · `3 autres jeux`
 demande des contenus d'autres jeux, qu'on ne peut pas livrer (à recréer, ou le joueur doit posséder ces jeux).
 
-
 ## Affichage et caméra
 - [ ] Plein écran natif (écran large sans déformation) — `1`
 - [ ] Caméra libre sur le terrain (stick droit), distance d'affichage plus longue — `2`

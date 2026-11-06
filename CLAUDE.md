@@ -1,7 +1,8 @@
 # Project Rules — Pkm Origins
 
 Pkm Origins: a recompilation of Pokémon X/Y and Omega Ruby/Alpha Sapphire (Nintendo 3DS) into native programs, PC and
-Android together (the owner tests on Android), with no emulator; no game data in the repository (§1). The plan: `docs/RECOMPILATION_PLAN.md`.
+Android together (the owner tests on Android), with no emulator; no game data in the repository (§1). The plan:
+`docs/RECOMPILATION_PLAN.md`; the features wanted afterwards: `docs/FEATURE_IDEAS.md`.
 
 Hard rules for any change. They follow Pomegrade's CLAUDE.md (verification, scope, naming, documentation homes), adapted to
 a decompilation.
@@ -38,7 +39,7 @@ a decompilation.
 | Tools: binary splitting, symbol lists, matching checks | `tools/` |
 | Symbol names (address, name, status) for each game version | `symbols/` |
 | Tests | `tests/` |
-| Documentation | Root: `CLAUDE.md` only (no README, owner's decision of 4 November); the rest in `docs/` |
+| Documentation | Root: `CLAUDE.md` only (no README, owner's decision of 4 November); the rest in `docs/`: `RECOMPILATION_PLAN.md` (the plan and its progress), `FEATURE_IDEAS.md` (the owner's checklist of features for after the faithful recompilation, in French, edited by the owner), `BALANCE_STUDY.md` (the balance study behind the "Rééquilibré" option: Smogon usage data and game design, in French), `AGENT_HANDOFF.md` (the state of the work and how to carry it on, for the next agent: kept current at each hand-off) |
 
 Names: C/C++ files in PascalCase after their subject (`FieldCamera.cpp`); a decompiled function keeps the name given in
 `symbols/` (Pomegrade's `function_names.tsv` style: `Subsystem_Action`). No catch-all `misc/` or `utils/` folder.
