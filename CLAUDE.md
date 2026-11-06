@@ -14,10 +14,6 @@ a decompilation.
 - The game's files are read at run time from the player's copy (a path given by the player).
 - Function and variable names, structure layouts and format descriptions are ours and may be committed.
 
-- Pomegrade (the owner's other project) is a separate project: it may be used (its Azahar as the reference, its
-  headless runner, its knowledge of the games), but its code and files are not brought into Pkm Origins as a habit; when
-  something of it is needed here, ask, then make it Pkm Origins' own (owner's rule, 6 November).
-
 ## 2. Faithful first, customised after
 
 - A function is first decompiled to behave exactly like the original: same results for the same inputs. Proven by
@@ -47,6 +43,10 @@ a decompilation.
 
 Names: C/C++ files in PascalCase after their subject (`FieldCamera.cpp`); a decompiled function keeps the name given in
 `symbols/` (Pomegrade's `function_names.tsv` style: `Subsystem_Action`). No catch-all `misc/` or `utils/` folder.
+
+Pomegrade (the owner's other project) is a separate project: it may be used (its Azahar as the reference, its headless
+runner, its knowledge of the games), but its code and files are not brought into Pkm Origins as a habit; when something
+of it is needed here, ask, then make it Pkm Origins' own (owner's rule, 6 November).
 
 ## 5. Commits
 
