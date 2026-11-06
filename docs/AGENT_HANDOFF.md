@@ -14,7 +14,8 @@ what is done, §11 for the renderer). This file says where things stand and what
 - **Runtime (`src/hos/`):** the game boots, plays its opening cinematic to the end and goes past it. No freeze left
   that is known (the DSP one is fixed: `DspSource.c`).
 - **Renderer (`src/platform/`):** Vulkan, headless, frames to PPM. The opening matches Azahar's shots (29 of 36 within
-  2.5 / 255). It is the first, correct-but-slow form: one submission per draw, vertex shaders on the CPU.
+  2.5 / 255). One submission a frame (6 November); the vertex shaders still on the CPU, which is now where the time
+  goes. The immediate mode (the title movie) is done.
 - **Where the game gets (6 November, end of session):** the opening, the title movie and the title screen
   ("POKÉMON RUBIS OMÉGA / APPUYEZ SUR START"), with the owner's save. The last two fixes: a thread ending releases the
   mutexes it holds (the main thread waited for ever behind one), and the GPU's immediate mode (the movie is drawn
@@ -39,6 +40,8 @@ runner.
 | The game's calls, ours and Azahar's | `tools/hos_call_counts.sh` (ours), `tools/azahar_trace_run.sh` (Azahar's), `tools/call_counts_compare.py` |
 | Hand-written code | `tools/asm_scan.py <code.bin> hand-calls / refs <address> / literals <functions.tsv>` |
 | A thread dump of a running game | `kill -USR1 <pid>` (or `$HOS_DUMP_AFTER=<seconds>`) |
+| The renderer's speed | `tools/render_bench.sh $S <seconds> [binary]` (top-screen frames from the start; compare builds) |
+| Where the time goes | `tools/sample_stacks.py <pid>` (gdb samples of every thread's stack: no perf here) |
 
 Lessons that cost time, so they are not paid twice:
 
@@ -59,16 +62,21 @@ Lessons that cost time, so they are not paid twice:
 
 ## Next steps, in order
 
-1. **The title movie and title screen against Azahar**, frame by frame (`azahar_shots.sh` with the save from frame
-   2,600, `frame_compare.py`), then input: press Start (`$HOS_INPUT`, scripted buttons) and follow the game to the
-   save menu and the field, comparing as it goes.
-2. **Fog** in the fragment shader (`PicaFragment.c`, Azahar's generator as the reference), then the volcano shot (y9).
-3. **A render target written back to memory** when the game reads it as memory (the display transfer from VRAM to
-   the linear heap seen at frame 0).
-4. **Speed** (owner's question, 6 November: the renderer is not yet what the plan promises): one command buffer per
-   frame, the vertex shaders on the GPU (the translator `PicaShaderGlsl.c` exists and is tested, not plugged in), the
-   renderer on its own thread (it holds the kernel lock today, which caused the DSP freeze). Measure each on one scene
-   and check it against Azahar again.
+The owner chose (6 November): finish the renderer first, speed first, faithful at every step (each change measured
+with `render_bench.sh` and checked against Azahar's shots).
+
+1. **The vertex shaders on the GPU**: the biggest share of the time left (`sample_stacks.py`, 6 November). The PICA
+   shader to GLSL translator exists and is tested (`src/platform/PicaShaderGlsl.c`, 300 random programs equal to the
+   interpreter on lavapipe); the vertex loaders' attributes to a vertex buffer, the uniforms to a buffer, the
+   geometry shader and immediate mode kept on the CPU path at first.
+2. **The renderer on its own thread**: it holds the kernel lock while it draws today (the cause of the DSP freeze).
+3. **A build without the GPU trace** (`build_game.py` without `--gpu-trace`) for the speed of the game code itself;
+   the trace instruments every store.
+4. **Fog**, then **a render target written back to memory** when the game reads it as memory.
+5. **A window on PC, then Android** (the owner's phone: Mali).
+6. Then the coverage of what the game uses (services, GPU features: from call counts at many moments) and mass
+   comparisons with Azahar (saves at many places, scripted input), with a blame by elimination when a scene differs.
+   The title movie and title screen are not yet compared frame by frame.
 
 ## Open with the owner
 

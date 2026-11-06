@@ -513,8 +513,14 @@ Performance comes first in every design choice, the more so for the seamless co-
    **Where it stands:** the game runs through the opening, the title movie and to the title screen ("POKÉMON RUBIS
    OMÉGA / APPUYEZ SUR START"). The last two blockers: a thread that ended holding a mutex (the 3DS kernel releases
    them: Azahar's ReleaseThreadMutexes), the main thread waiting behind it for ever; and the GPU's immediate mode
-   (vertices given through the default attribute registers, index 0xF), with which the movie is drawn. Next: the movie
-   and the title compared with Azahar frame by frame, then input.
+   (vertices given through the default attribute registers, index 0xF), with which the movie is drawn.
+   **Speed (owner's choice, 6 November: the renderer finished first, speed first, faithful at each step).** One
+   submission a frame (the draws recorded into one command buffer, rings for vertices, uniforms, lighting tables and
+   uploads, a full barrier between passes): 1,101 -> 1,301 top-screen frames in the first 120 s
+   (`tools/render_bench.sh`), the pond still as Azahar's. The DSP's frames owed are made as soon as the game is ready
+   (put off to the next tick, each cost a whole period). A profile (`tools/sample_stacks.py`) puts the rest in the
+   vertex shaders run on the CPU, then the frames written to disk and the GPU trace of the test build: the vertex
+   shaders on the GPU are next (AGENT_HANDOFF.md, next steps).
 
 ## 11. The renderer's architecture (step 4; owner's request, 5 November. Built since, first form: src/platform/Pica*.c and VulkanRenderer.c, the opening rendered as Azahar's, §10; not yet fast)
 
