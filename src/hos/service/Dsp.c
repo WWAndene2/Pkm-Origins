@@ -59,12 +59,25 @@ static void write_structure_addresses(void)
     signal_event(pipe_interrupt[PIPE_AUDIO]);
 }
 
+/* audio frames due (one every 4.89 ms) and not yet made: a frame waits for the game's next one (DspSource.c), and is
+   made as soon as the game has written it, not at the next tick: put off to the next tick, every frame the game was
+   late for cost a whole period, and the sound, with the cutscenes timed by it, ran at about half speed (6 November:
+   1,230 frames in 120 s, the process idle most of the time). At most 2 owed (a late game does not get a burst). */
+static int frames_owed;
+
+static void make_owed(void)
+{
+    if (state == ON && frames_owed > 0 && hos_dsp_sources_tick()) { /* (statuses as Azahar's GenerateCurrentFrame) */
+        frames_owed--;
+        signal_event(pipe_interrupt[PIPE_AUDIO]);
+    }
+}
+
 static void tick(void)
 {
-    if (state == ON) {
-        if (hos_dsp_sources_tick()) /* the sources' statuses (DspSource.c), as Azahar's GenerateCurrentFrame writes them */
-            signal_event(pipe_interrupt[PIPE_AUDIO]);
-    }
+    if (state == ON && frames_owed < 2)
+        frames_owed++;
+    make_owed();
 }
 
 static void recv_data(HosRequest* q)
@@ -115,6 +128,7 @@ static void write_process_pipe(HosRequest* q)
         if (!ticking) {
             ticking = 1;
             hos_clock_every(1310720LL * 1000000000 / 268111856, tick); /* (Azahar's audio_frame_ticks: 4.89 ms) */
+            hos_clock_every(250000, make_owed); /* (an owed frame made within 0.25 ms of the game's) */
         }
     } else {
         fprintf(stderr, "hos: dsp::DSP WriteProcessPipe on pipe %u (%u bytes) not done\n", channel, size);

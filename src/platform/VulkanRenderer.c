@@ -30,6 +30,7 @@ static VkRenderPass render_pass;
 static VkShaderModule vertex_module;
 static const char* dir;
 static int ready = -2; /* -2 not tried, -1 off, 0 on */
+enum { SETS = 8192 }; /* descriptor sets a submission can use */
 static unsigned frame_count;
 
 static uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want)
@@ -85,14 +86,71 @@ static void begin(void)
     vkBeginCommandBuffer(cmd, &bi);
 }
 
+static unsigned long long submits;
 static void submit(void)
 {
+    submits++;
     vkEndCommandBuffer(cmd);
     VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &cmd};
     vkResetFences(dev, 1, &fence);
     vkQueueSubmit(queue, 1, &si, fence);
     vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
 }
+
+/* ---- the frame's command buffer: recorded across draws, submitted only when a result is needed (a display transfer
+   read back) or a ring is full (docs/RECOMPILATION_PLAN.md §11.3: one submission a frame, not one a draw) ---- */
+static int recording;      /* the command buffer is open */
+static int open_target = -1; /* the render target whose render pass is open, or -1 */
+static VkDeviceSize min_ubo_align = 256, min_ssbo_align = 256;
+
+static void record(void)
+{
+    if (!recording) {
+        begin();
+        recording = 1;
+    }
+}
+
+/* every write before it visible to every command after it: between render passes, clears, copies (they all use the
+   general layout; the order of the PICA's work is kept exactly, at the cost of overlap: to be narrowed once measured) */
+static void barrier_all(void)
+{
+    VkMemoryBarrier mb = {VK_STRUCTURE_TYPE_MEMORY_BARRIER, NULL, VK_ACCESS_MEMORY_WRITE_BIT,
+                          VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &mb, 0, NULL,
+                         0, NULL);
+}
+
+static void end_pass(void)
+{
+    if (open_target >= 0) {
+        vkCmdEndRenderPass(cmd);
+        open_target = -1;
+    }
+}
+
+/* outside any render pass, after every earlier write: for a clear, a copy, an upload */
+static void outside_pass(void)
+{
+    record();
+    end_pass();
+    barrier_all();
+}
+
+static void rings_reset(void);
+
+/* the recorded work submitted and waited for; the rings free again */
+static void flush(void)
+{
+    if (!recording)
+        return;
+    end_pass();
+    submit();
+    recording = 0;
+    rings_reset();
+}
+
+
 
 static void barrier_to_general(VkImage image, VkImageAspectFlags aspect)
 {
@@ -199,9 +257,9 @@ int vk_renderer_init(void)
     VKI(vkCreateDescriptorSetLayout(dev, &dli, NULL, &set_layout));
     VkPipelineLayoutCreateInfo pli = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, NULL, 0, 1, &set_layout};
     VKI(vkCreatePipelineLayout(dev, &pli, NULL, &pipe_layout));
-    VkDescriptorPoolSize ps[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4},
-                                  {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 12}};
-    VkDescriptorPoolCreateInfo dpi = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, NULL, 0, 4, 3, ps};
+    VkDescriptorPoolSize ps[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, SETS}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, SETS},
+                                  {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3 * SETS}};
+    VkDescriptorPoolCreateInfo dpi = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, NULL, 0, SETS, 3, ps};
     VKI(vkCreateDescriptorPool(dev, &dpi, NULL, &desc_pool));
 
     /* one render pass: colour RGBA8 and depth-stencil D24S8, both loaded and kept, in the general layout */
@@ -219,6 +277,8 @@ int vk_renderer_init(void)
         return -1;
     VkPhysicalDeviceProperties pp;
     vkGetPhysicalDeviceProperties(phys, &pp);
+    min_ubo_align = pp.limits.minUniformBufferOffsetAlignment;
+    min_ssbo_align = pp.limits.minStorageBufferOffsetAlignment;
     fprintf(stderr, "renderer: Vulkan on %s, frames in %s\n", pp.deviceName, dir);
     ready = 0;
     return 0;
@@ -246,7 +306,7 @@ static int target_for(uint32_t address, uint32_t width, uint32_t height)
     VkImageView views[2] = {targets[k].color.view, targets[k].depth.view};
     VkFramebufferCreateInfo fi = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, NULL, 0, render_pass, 2, views, width, height, 1};
     if (vkCreateFramebuffer(dev, &fi, NULL, &targets[k].fb) != VK_SUCCESS) return -1;
-    begin();
+    outside_pass();
     barrier_to_general(targets[k].color.image, VK_IMAGE_ASPECT_COLOR_BIT);
     barrier_to_general(targets[k].depth.image, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
     VkClearColorValue black = {{0, 0, 0, 0}};
@@ -255,7 +315,6 @@ static int target_for(uint32_t address, uint32_t width, uint32_t height)
     VkClearDepthStencilValue ds = {1, 0};
     VkImageSubresourceRange dr = {VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1};
     vkCmdClearDepthStencilImage(cmd, targets[k].depth.image, VK_IMAGE_LAYOUT_GENERAL, &ds, 1, &dr);
-    submit();
     targets[k].address = address;
     targets[k].width = width;
     targets[k].height = height;
@@ -304,18 +363,27 @@ static void texture_save(int k, const uint8_t* rgba)
     fclose(f);
 }
 
+enum { STAGING = 64 << 20 };
+static VkDeviceSize staging_used; /* the staging ring: uploads recorded since the last submission */
+
 static int texture_upload(int k, const uint8_t* data)
 {
-    if (!staging.buf && make_buffer(&staging, 1024 * 1024 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT))
+    if (!staging.buf && make_buffer(&staging, STAGING, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT))
         return 0;
-    pica_texture_decode(textures[k].format, data, textures[k].width, textures[k].height, staging.map);
-    texture_save(k, staging.map);
+    const VkDeviceSize need = (VkDeviceSize)textures[k].width * textures[k].height * 4;
+    if (staging_used + need > STAGING)
+        flush();
+    const VkDeviceSize at = staging_used;
+    staging_used = (staging_used + need + 15) & ~(VkDeviceSize)15;
+    uint8_t* const stage = (uint8_t*)staging.map + at;
+    pica_texture_decode(textures[k].format, data, textures[k].width, textures[k].height, stage);
+    texture_save(k, stage);
     /* the rows turned over: the PICA's t = 0 is the texture's last row in memory (Azahar's rasterizer reads row
        height - 1 - t), Vulkan's v = 0 the image's first; read as it lay, every model had its textures upside down
        (closed eyes instead of open ones from the eye sheet, the hat's hair on its top, the title text mirrored) */
     {
         const uint32_t w = textures[k].width, h = textures[k].height;
-        uint32_t* px = staging.map;
+        uint32_t* px = (uint32_t*)stage;
         for (uint32_t y = 0; y < h / 2; y++)
             for (uint32_t x = 0; x < w; x++) {
                 const uint32_t t = px[y * w + x];
@@ -323,11 +391,10 @@ static int texture_upload(int k, const uint8_t* data)
                 px[(h - 1 - y) * w + x] = t;
             }
     }
-    begin();
+    outside_pass();
     barrier_to_general(textures[k].image.image, VK_IMAGE_ASPECT_COLOR_BIT);
-    VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {textures[k].width, textures[k].height, 1}};
+    VkBufferImageCopy copy = {at, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {textures[k].width, textures[k].height, 1}};
     vkCmdCopyBufferToImage(cmd, staging.buf, textures[k].image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
-    submit();
     return 1;
 }
 
@@ -366,6 +433,7 @@ static VkImageView texture_view(PicaState* s, uint32_t address, uint32_t width, 
         }
     int k = texture_next++ % TEXTURES;
     if (textures[k].used) {
+        flush(); /* (recorded commands may still use the image evicted) */
         vkDestroyImageView(dev, textures[k].image.view, NULL);
         vkDestroyImage(dev, textures[k].image.image, NULL);
         vkFreeMemory(dev, textures[k].image.mem, NULL);
@@ -558,7 +626,31 @@ static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
     return p;
 }
 
+/* the rings a submission's draws take their data from: vertices, fragment uniforms (one aligned slot a draw), the
+   lighting tables (a slot reused while they stay the same: most draws share them, 48 KiB each), descriptor sets */
+enum { VERTEX_RING = 64 << 20, UNIFORM_SLOTS = SETS, LUT_SLOTS = 256, LUT_BYTES = 24 * 256 * 8 };
 static Buffer vertices, uniforms, luts;
+static VkDeviceSize vertex_used, uniform_slot_size;
+static int uniform_used, lut_used, sets_used;
+static uint64_t lut_hash[LUT_SLOTS];
+
+static void rings_reset(void)
+{
+    vertex_used = 0;
+    uniform_used = lut_used = sets_used = 0;
+    staging_used = 0;
+    vkResetDescriptorPool(dev, desc_pool, 0);
+}
+
+static int rings_make(void)
+{
+    if (vertices.buf)
+        return 0;
+    uniform_slot_size = (sizeof(PicaFragmentUniforms) + min_ubo_align - 1) / min_ubo_align * min_ubo_align;
+    return make_buffer(&vertices, VERTEX_RING, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ||
+           make_buffer(&uniforms, uniform_slot_size * UNIFORM_SLOTS, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) ||
+           make_buffer(&luts, (VkDeviceSize)LUT_BYTES * LUT_SLOTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+}
 unsigned long long vk_skips[8]; /* draws not drawn, by reason (renderer_report prints them) */
 static PicaVertex triangles[1 << 18];
 
@@ -583,16 +675,32 @@ void vk_renderer_draw(PicaState* s, int indexed)
         return;
     VkPipeline p = pipeline_for(s, frag, len);
     if (!p) { vk_skips[3]++; return; }
-    if (!vertices.buf && (make_buffer(&vertices, sizeof triangles, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ||
-                          make_buffer(&uniforms, sizeof(PicaFragmentUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) ||
-                          make_buffer(&luts, 24 * 256 * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)))
+    if (rings_make())
         return;
     if (!BITS(r[0x11E], 24, 1)) /* flipped (Azahar's trivial vertex shader: vtx_pos.y = -vtx_pos.y) */
         for (long k = 0; k < n; k++)
             triangles[k].position[1] = -triangles[k].position[1];
-    memcpy(vertices.map, triangles, (size_t)n * sizeof(PicaVertex));
-    pica_fragment_uniforms(s, uniforms.map);
-    pica_fragment_luts(s, luts.map);
+    const VkDeviceSize vbytes = (VkDeviceSize)n * sizeof(PicaVertex);
+    if (vertex_used + vbytes > VERTEX_RING || uniform_used == UNIFORM_SLOTS || sets_used == SETS || lut_used == LUT_SLOTS)
+        flush(); /* (every ring checked before any is written: a flush frees them all) */
+    const VkDeviceSize voffset = vertex_used;
+    memcpy((uint8_t*)vertices.map + voffset, triangles, (size_t)vbytes);
+    vertex_used += (vbytes + 15) & ~(VkDeviceSize)15;
+    const VkDeviceSize uoffset = uniform_slot_size * (VkDeviceSize)uniform_used++;
+    PicaFragmentUniforms* const fu = (PicaFragmentUniforms*)((uint8_t*)uniforms.map + uoffset);
+    pica_fragment_uniforms(s, fu);
+    static float lut_now[24 * 256][2];
+    pica_fragment_luts(s, lut_now);
+    const uint64_t lh = hash_bytes((const uint8_t*)lut_now, sizeof lut_now);
+    int lslot = -1;
+    for (int k = lut_used - 1; k >= 0 && k >= lut_used - 4; k--) /* (the last few: most draws share the last) */
+        if (lut_hash[k] == lh) { lslot = k; break; }
+    if (lslot < 0) {
+        lslot = lut_used++;
+        lut_hash[lslot] = lh;
+        memcpy((uint8_t*)luts.map + (VkDeviceSize)LUT_BYTES * lslot, lut_now, LUT_BYTES);
+    }
+    const VkDeviceSize uoff_final = uoffset;
     /* the texture units' images, or the first render target's colour as a stand-in for a unit that has none */
     static const uint32_t addr_reg[3] = {0x085, 0x095, 0x09D}, dim_reg[3] = {0x082, 0x092, 0x09A},
                           param_reg[3] = {0x083, 0x093, 0x09B}, fmt_reg[3] = {0x08E, 0x096, 0x09E};
@@ -608,11 +716,12 @@ void vk_renderer_draw(PicaState* s, int indexed)
         }
         images[u] = (VkDescriptorImageInfo){sampler_for(r[param_reg[u]]), v, VK_IMAGE_LAYOUT_GENERAL};
     }
-    vkResetDescriptorPool(dev, desc_pool, 0);
     VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, NULL, desc_pool, 1, &set_layout};
     VkDescriptorSet set;
     VK(vkAllocateDescriptorSets(dev, &dai, &set));
-    VkDescriptorBufferInfo ub = {uniforms.buf, 0, VK_WHOLE_SIZE}, lb = {luts.buf, 0, VK_WHOLE_SIZE};
+    sets_used++;
+    VkDescriptorBufferInfo ub = {uniforms.buf, uoff_final, sizeof(PicaFragmentUniforms)},
+                           lb = {luts.buf, (VkDeviceSize)LUT_BYTES * lslot, LUT_BYTES};
     VkWriteDescriptorSet w[5] = {
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, set, 0, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, NULL, &ub},
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, set, 1, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, NULL, &lb},
@@ -621,10 +730,15 @@ void vk_renderer_draw(PicaState* s, int indexed)
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, set, 4, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &images[2]}};
     vkUpdateDescriptorSets(dev, 5, w, 0, NULL);
 
-    begin();
-    VkRenderPassBeginInfo rb = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, NULL, render_pass, targets[t].fb,
-                                {{0, 0}, {width, height}}};
-    vkCmdBeginRenderPass(cmd, &rb, VK_SUBPASS_CONTENTS_INLINE);
+    record();
+    if (open_target != t) { /* (draws to the same target share one render pass, in order) */
+        end_pass();
+        barrier_all();
+        VkRenderPassBeginInfo rb = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, NULL, render_pass, targets[t].fb,
+                                    {{0, 0}, {width, height}}};
+        vkCmdBeginRenderPass(cmd, &rb, VK_SUBPASS_CONTENTS_INLINE);
+        open_target = t;
+    }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout, 0, 1, &set, 0, NULL);
     /* the viewport: half sizes as float24 (0x041, 0x043), the corner (0x068) */
@@ -633,13 +747,9 @@ void vk_renderer_draw(PicaState* s, int indexed)
     vkCmdSetViewport(cmd, 0, 1, &view);
     VkRect2D scissor = {{0, 0}, {width, height}};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
-    const PicaFragmentUniforms* fu = uniforms.map;
-    vkCmdSetBlendConstants(cmd, fu->blend_color);
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &vertices.buf, &offset);
+    vkCmdSetBlendConstants(cmd, ((const PicaFragmentUniforms*)((uint8_t*)uniforms.map + uoff_final))->blend_color);
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertices.buf, &voffset);
     vkCmdDraw(cmd, (uint32_t)n, 1, 0, 0);
-    vkCmdEndRenderPass(cmd);
-    submit();
 }
 
 void vk_renderer_display(uint32_t source)
@@ -655,10 +765,10 @@ void vk_renderer_display(uint32_t source)
         Buffer out;
         if (make_buffer(&out, (VkDeviceSize)w * h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT))
             return;
-        begin();
+        outside_pass();
         VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
         vkCmdCopyImageToBuffer(cmd, targets[k].color.image, VK_IMAGE_LAYOUT_GENERAL, out.buf, 1, &copy);
-        submit();
+        flush(); /* (the frame's work submitted and waited for: its image is read back) */
         char path[700];
         snprintf(path, sizeof path, "%s/frame_%04u_%08X.ppm", dir, frame_count++, source);
         FILE* f = fopen(path, "wb");
@@ -698,7 +808,7 @@ void vk_renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t wid
                           end >= targets[k].depth_address + size / 2;
         if (!color && !depth)
             continue;
-        begin();
+        outside_pass();
         if (color) { /* an RGBA8 pixel in memory: A B G R, the fill value R G B A from its high byte */
             VkClearColorValue c = {{(float)(value >> 24 & 0xFF) / 255.0f, (float)(value >> 16 & 0xFF) / 255.0f,
                                     (float)(value >> 8 & 0xFF) / 255.0f, (float)(value & 0xFF) / 255.0f}};
@@ -712,7 +822,6 @@ void vk_renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t wid
             VkImageSubresourceRange dr = {VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1};
             vkCmdClearDepthStencilImage(cmd, targets[k].depth.image, VK_IMAGE_LAYOUT_GENERAL, &ds, 1, &dr);
         }
-        submit();
     }
 }
 
@@ -729,3 +838,6 @@ void vk_renderer_copied(uint32_t address, uint32_t bytes)
             return;
         }
 }
+
+/* the submissions made so far (renderer_report) */
+unsigned long long vk_renderer_submits(void) { return submits; }
