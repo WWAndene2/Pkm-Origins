@@ -286,6 +286,19 @@ static int texture_upload(int k, const uint8_t* data)
     if (!staging.buf && make_buffer(&staging, 1024 * 1024 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT))
         return 0;
     pica_texture_decode(textures[k].format, data, textures[k].width, textures[k].height, staging.map);
+    /* the rows turned over: the PICA's t = 0 is the texture's last row in memory (Azahar's rasterizer reads row
+       height - 1 - t), Vulkan's v = 0 the image's first; read as it lay, every model had its textures upside down
+       (closed eyes instead of open ones from the eye sheet, the hat's hair on its top, the title text mirrored) */
+    {
+        const uint32_t w = textures[k].width, h = textures[k].height;
+        uint32_t* px = staging.map;
+        for (uint32_t y = 0; y < h / 2; y++)
+            for (uint32_t x = 0; x < w; x++) {
+                const uint32_t t = px[y * w + x];
+                px[y * w + x] = px[(h - 1 - y) * w + x];
+                px[(h - 1 - y) * w + x] = t;
+            }
+    }
     begin();
     barrier_to_general(textures[k].image.image, VK_IMAGE_ASPECT_COLOR_BIT);
     VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {textures[k].width, textures[k].height, 1}};
