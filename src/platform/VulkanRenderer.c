@@ -263,43 +263,79 @@ static int target_for(uint32_t address, uint32_t width, uint32_t height)
     return k;
 }
 
-/* textures, by address, size and format (decoded to RGBA8 once) */
+/* textures, by address, size and format, decoded to RGBA8; their bytes hashed again once a frame and the image
+ * decoded again when they changed (a game loads new textures where old ones were: the cinematic streams its scenes'
+ * textures into the same buffers, which a cache by address alone kept showing from the first scene) */
 enum { TEXTURES = 1024 };
-static struct { uint32_t address, width, height, format; Image image; int used; } textures[TEXTURES];
+static struct { uint32_t address, width, height, format, stamp; uint64_t hash; Image image; int used; } textures[TEXTURES];
 static int texture_next;
 static Buffer staging;
+unsigned long long vk_texture_reloads, vk_texture_in_target;
+
+static uint64_t hash_bytes(const uint8_t* p, size_t n)
+{
+    uint64_t h = 1469598103934665603ull;
+    const uint64_t* w = (const uint64_t*)p; /* (sizes are multiples of 8: 8 x 8 tiles) */
+    for (size_t k = 0; k < n / 8; k++)
+        h = (h ^ w[k]) * 1099511628211ull;
+    return h;
+}
+
+static int texture_upload(int k, const uint8_t* data)
+{
+    if (!staging.buf && make_buffer(&staging, 1024 * 1024 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT))
+        return 0;
+    pica_texture_decode(textures[k].format, data, textures[k].width, textures[k].height, staging.map);
+    begin();
+    barrier_to_general(textures[k].image.image, VK_IMAGE_ASPECT_COLOR_BIT);
+    VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {textures[k].width, textures[k].height, 1}};
+    vkCmdCopyBufferToImage(cmd, staging.buf, textures[k].image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
+    submit();
+    return 1;
+}
 
 static VkImageView texture_view(PicaState* s, uint32_t address, uint32_t width, uint32_t height, uint32_t format)
 {
-    for (int k = 0; k < TEXTURES; k++)
-        if (textures[k].used && textures[k].address == address && textures[k].width == width &&
-            textures[k].height == height && textures[k].format == format)
-            return textures[k].image.view;
     const size_t bytes = pica_texture_size(format, width, height);
     const uint8_t* data = bytes && s->memory ? (const uint8_t*)s->memory(address, (uint32_t)bytes, s->user) : NULL;
     if (!data || !width || !height || width > 1024 || height > 1024)
         return VK_NULL_HANDLE;
+    for (int k = 0; k < TARGETS; k++)
+        if (targets[k].used && address >= targets[k].address &&
+            address < targets[k].address + targets[k].width * targets[k].height * 4)
+            vk_texture_in_target++; /* (counted: drawn-into textures are read from memory as the GSP left it) */
+    for (int k = 0; k < TEXTURES; k++)
+        if (textures[k].used && textures[k].address == address && textures[k].width == width &&
+            textures[k].height == height && textures[k].format == format) {
+            if (textures[k].stamp != frame_count) {
+                textures[k].stamp = frame_count;
+                const uint64_t h = hash_bytes(data, bytes);
+                if (h != textures[k].hash) {
+                    textures[k].hash = h;
+                    vk_texture_reloads++;
+                    texture_upload(k, data);
+                }
+            }
+            return textures[k].image.view;
+        }
     int k = texture_next++ % TEXTURES;
     if (textures[k].used) {
         vkDestroyImageView(dev, textures[k].image.view, NULL);
         vkDestroyImage(dev, textures[k].image.image, NULL);
         vkFreeMemory(dev, textures[k].image.mem, NULL);
+        textures[k].used = 0;
     }
     if (make_image(&textures[k].image, width, height, VK_FORMAT_R8G8B8A8_UNORM,
                    VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_COLOR_BIT))
         return VK_NULL_HANDLE;
-    if (!staging.buf && make_buffer(&staging, 1024 * 1024 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT))
-        return VK_NULL_HANDLE;
-    pica_texture_decode(format, data, width, height, staging.map);
-    begin();
-    barrier_to_general(textures[k].image.image, VK_IMAGE_ASPECT_COLOR_BIT);
-    VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {width, height, 1}};
-    vkCmdCopyBufferToImage(cmd, staging.buf, textures[k].image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
-    submit();
     textures[k].address = address;
     textures[k].width = width;
     textures[k].height = height;
     textures[k].format = format;
+    textures[k].stamp = frame_count;
+    textures[k].hash = hash_bytes(data, bytes);
+    if (!texture_upload(k, data))
+        return VK_NULL_HANDLE;
     textures[k].used = 1;
     return textures[k].image.view;
 }

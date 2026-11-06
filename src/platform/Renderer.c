@@ -159,10 +159,11 @@ void renderer_submit_list(uint32_t address, uint32_t size)
     pica_state_run(&state, (const uint32_t*)(hos_memory + address), size / 4);
 }
 
-extern unsigned long long vk_skips[8];
+extern unsigned long long vk_skips[8], vk_texture_reloads, vk_texture_in_target;
 void renderer_report(void)
 {
     fprintf(stderr, "renderer: draws skipped: no target %llu, memory %llu, no triangles %llu, no pipeline %llu; texture units with no texture %llu\n", vk_skips[0], vk_skips[1], vk_skips[2], vk_skips[3], vk_skips[4]);
+    fprintf(stderr, "renderer: textures decoded again (their bytes changed) %llu, read inside a render target %llu\n", vk_texture_reloads, vk_texture_in_target);
     if (!stats)
         return;
     fprintf(stats, "# draws %llu, triangles %llu; vertices %llu, of them finite %llu, inside the screen %llu\n"
