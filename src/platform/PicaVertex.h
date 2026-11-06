@@ -30,4 +30,9 @@ long pica_vertex_draw(PicaState* state, int indexed, PicaVertex* out, long max);
    geometry shader) into out, the assembly kept between calls */
 long pica_vertex_immediate(PicaState* state, PicaVertex* out, long max);
 
+/* a draw's input attributes for the GPU's vertex shader: per vertex in draw order (the index buffer applied), its
+   max_input_attrib_index + 1 attributes (0x2B9) as vec4s, packed; the vertex count, or -1 (memory not reachable,
+   more than max vertices) */
+long pica_vertex_inputs(PicaState* state, int indexed, float (*out)[4], long max);
+
 #endif
