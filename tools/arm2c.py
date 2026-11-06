@@ -813,6 +813,23 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 # ldr rN, [rA, rB, lsl #2]; bx rN: a jump through a table of addresses, into this function as a rule
                 # (a threaded interpreter: the Pawn scripts' AMX at Omega Ruby's 00503DAC), a switch like the others
                 line.append(jump("c->r[%d]" % rd()).replace("goto DISPATCH", "if (jt == ret) return; goto DISPATCH", 1))
+            elif base_m == "bx" and ops[0].type == ARM_OP_REG and not thumb and preset_return(k_) is not None:
+                # add lr, pc, #n just before: a call by hand through a register (001BC884-888: add lr, pc, #0; bx r4)
+                back = preset_return(k_)
+                # (the register set from pc just before, conditionally or not: addhs r4, pc, #0x14c / addlo r4, pc,
+                # #0x84; each address an entry, which call_indirect finds, when inside another function)
+                for j in range(k_ - 1, max(-1, k_ - 9), -1):
+                    p_ = insns[j]
+                    o_ = p_.operands
+                    if p_.mnemonic[:3] in ("add", "sub") and len(o_) == 3 and o_[0].type == ARM_OP_REG \
+                            and o_[0].reg == ops[0].reg and o_[1].type == ARM_OP_REG and p_.reg_name(o_[1].reg) == "pc" \
+                            and o_[2].type == ARM_OP_IMM and entries is not None:
+                        t_ = (pc_of(p_.address) + (o_[2].imm if p_.mnemonic.startswith("add") else -o_[2].imm)) & 0xFFFFFFFF
+                        if not is_start(t_, False):  # (inside this function too: call_indirect finds entries only)
+                            entries.add(t_)
+                        callees.add(t_)
+                line.append("{ uint32_t t = c->r[%d]; c->r[14] = %s; call_indirect(c, t, %s); if (c->fault) return; %s }"
+                            % (rd(), ADDR(back), ADDR(back), go_on_at(back)))
             elif base_m == "bx" and ops[0].type == ARM_OP_REG:  # a jump through a register: the function it lands in returns
                 # for this one; to the address this function returns to, it is the return itself (lr popped into
                 # another register: pop {r3}; bx r3, Omega Ruby's 001028A6)
