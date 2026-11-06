@@ -1,8 +1,8 @@
 /* dsp::DSP: the sound processor, as Azahar's high-level DSP has it (service/dsp/dsp_dsp.cpp, audio_core/hle/hle.cpp),
  * but silent: its pipes, its interrupts, the addresses of the structures it shares with the game (in its memory at
  * 0x1FF00000), and its audio frame tick (every 160 samples at 32,728 Hz: 4.89 ms), which signals the game's audio
- * event as Azahar's does. What the tick does not do yet: mix the game's sound sources and write their statuses and
- * the mixed samples back (Azahar's GenerateCurrentFrame), and play them: step 5 (docs/RECOMPILATION_PLAN.md §3). The
+ * event as Azahar's does, after writing the sources' statuses (DspSource.c). What the tick does not do yet: mix the
+ * game's sound sources and write the mixed samples back (Azahar's GenerateCurrentFrame), and play them: step 5 (docs/RECOMPILATION_PLAN.md §3). The
  * binary pipe (the AAC decoder) is not done: a request on it stops the thread.
  */
 #include "../Ipc.h"
@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "../Memory.h"
+#include "DspSource.h"
 
 enum { PIPES = 8, PIPE_AUDIO = 2, PIPE_BINARY = 3, INTERRUPT_PIPE = 2 };
 enum { OFF, ON, SLEEPING };
@@ -60,8 +61,10 @@ static void write_structure_addresses(void)
 
 static void tick(void)
 {
-    if (state == ON)
+    if (state == ON) {
+        hos_dsp_sources_tick(); /* the sources' statuses (DspSource.c), as Azahar's GenerateCurrentFrame writes them */
         signal_event(pipe_interrupt[PIPE_AUDIO]);
+    }
 }
 
 static void recv_data(HosRequest* q)
