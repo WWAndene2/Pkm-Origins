@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.h>
 
 #include "PicaFragment.h"
+#include "PicaVertexShader.h"
 #include "PicaTexture.h"
 #include "PicaVertex.h"
 
@@ -247,17 +248,18 @@ int vk_renderer_init(void)
     VkFenceCreateInfo fi = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VKI(vkCreateFence(dev, &fi, NULL, &fence));
 
-    VkDescriptorSetLayoutBinding b[5] = {
+    VkDescriptorSetLayoutBinding b[6] = {
         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
         {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
         {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
         {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
-        {4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT}};
-    VkDescriptorSetLayoutCreateInfo dli = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, NULL, 0, 5, b};
+        {4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
+        {5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT}}; /* (the GPU vertex shader's uniforms) */
+    VkDescriptorSetLayoutCreateInfo dli = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, NULL, 0, 6, b};
     VKI(vkCreateDescriptorSetLayout(dev, &dli, NULL, &set_layout));
     VkPipelineLayoutCreateInfo pli = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, NULL, 0, 1, &set_layout};
     VKI(vkCreatePipelineLayout(dev, &pli, NULL, &pipe_layout));
-    VkDescriptorPoolSize ps[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, SETS}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, SETS},
+    VkDescriptorPoolSize ps[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * SETS}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, SETS},
                                   {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3 * SETS}};
     VkDescriptorPoolCreateInfo dpi = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, NULL, 0, SETS, 3, ps};
     VKI(vkCreateDescriptorPool(dev, &dpi, NULL, &desc_pool));
@@ -539,10 +541,17 @@ enum { PIPELINES = 512 };
 static struct { uint64_t key; VkPipeline pipe; } pipelines[PIPELINES];
 static int pipeline_count;
 
-static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
+/* vs: the draw's GPU vertex shader, or VK_NULL_HANDLE for the CPU path's vertices (PicaVertex, triangle lists); with
+   one, inputs vec4 attributes a vertex and the PICA's topology */
+static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len, VkShaderModule vs, uint64_t vs_key,
+                               uint32_t inputs)
 {
     const uint32_t* r = s->reg;
     uint64_t key = 1469598103934665603ull;
+    if (vs) {
+        key = (key ^ vs_key) * 1099511628211ull;
+        key = (key ^ (inputs | (BITS(r[0x25E], 8, 2) << 8) | 0x10000u)) * 1099511628211ull;
+    }
     for (long k = 0; k < len; k++)
         key = (key ^ (uint8_t)frag[k]) * 1099511628211ull;
     const uint32_t words[] = {r[0x040], r[0x100], r[0x101], r[0x102], r[0x105], r[0x106], r[0x107], r[0x112], r[0x11E] >> 24 & 1,
@@ -556,7 +565,8 @@ static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
     if (!fm)
         return VK_NULL_HANDLE;
     VkPipelineShaderStageCreateInfo stages[2] = {
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0, VK_SHADER_STAGE_VERTEX_BIT, vertex_module, "main"},
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0, VK_SHADER_STAGE_VERTEX_BIT,
+         vs ? vs : vertex_module, "main"},
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fm, "main"}};
     VkVertexInputBindingDescription vb = {0, sizeof(PicaVertex), VK_VERTEX_INPUT_RATE_VERTEX};
     VkVertexInputAttributeDescription va[8] = {
@@ -571,6 +581,19 @@ static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
     VkPipelineVertexInputStateCreateInfo vi = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, NULL, 0, 1, &vb, 8, va};
     VkPipelineInputAssemblyStateCreateInfo ia = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, NULL, 0,
                                                  VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
+    VkVertexInputBindingDescription gvb = {0, inputs * 16, VK_VERTEX_INPUT_RATE_VERTEX};
+    VkVertexInputAttributeDescription gva[16];
+    if (vs) { /* the draw's attributes as vec4s; lists, strips and fans as the PICA assembles them (the same vertex
+                 order, a strip's every other triangle included) */
+        for (uint32_t k = 0; k < inputs; k++)
+            gva[k] = (VkVertexInputAttributeDescription){k, 0, VK_FORMAT_R32G32B32A32_SFLOAT, k * 16};
+        vi.pVertexBindingDescriptions = &gvb;
+        vi.vertexAttributeDescriptionCount = inputs;
+        vi.pVertexAttributeDescriptions = gva;
+        static const VkPrimitiveTopology topology[3] = {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN};
+        ia.topology = topology[BITS(r[0x25E], 8, 2) == 3 ? 0 : BITS(r[0x25E], 8, 2)];
+    }
     VkPipelineViewportStateCreateInfo vp = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, NULL, 0, 1, NULL, 1, NULL};
     VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
     rs.polygonMode = VK_POLYGON_MODE_FILL;
@@ -629,15 +652,15 @@ static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
 /* the rings a submission's draws take their data from: vertices, fragment uniforms (one aligned slot a draw), the
    lighting tables (a slot reused while they stay the same: most draws share them, 48 KiB each), descriptor sets */
 enum { VERTEX_RING = 64 << 20, UNIFORM_SLOTS = SETS, LUT_SLOTS = 256, LUT_BYTES = 24 * 256 * 8 };
-static Buffer vertices, uniforms, luts;
-static VkDeviceSize vertex_used, uniform_slot_size;
-static int uniform_used, lut_used, sets_used;
+static Buffer vertices, uniforms, luts, vs_uniforms;
+static VkDeviceSize vertex_used, uniform_slot_size, vs_slot_size;
+static int uniform_used, lut_used, sets_used, vs_used;
 static uint64_t lut_hash[LUT_SLOTS];
 
 static void rings_reset(void)
 {
     vertex_used = 0;
-    uniform_used = lut_used = sets_used = 0;
+    uniform_used = lut_used = sets_used = vs_used = 0;
     staging_used = 0;
     vkResetDescriptorPool(dev, desc_pool, 0);
 }
@@ -647,12 +670,52 @@ static int rings_make(void)
     if (vertices.buf)
         return 0;
     uniform_slot_size = (sizeof(PicaFragmentUniforms) + min_ubo_align - 1) / min_ubo_align * min_ubo_align;
+    vs_slot_size = (sizeof(PicaVertexUniforms) + min_ubo_align - 1) / min_ubo_align * min_ubo_align;
     return make_buffer(&vertices, VERTEX_RING, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ||
+           make_buffer(&vs_uniforms, vs_slot_size * UNIFORM_SLOTS, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) ||
            make_buffer(&uniforms, uniform_slot_size * UNIFORM_SLOTS, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) ||
            make_buffer(&luts, (VkDeviceSize)LUT_BYTES * LUT_SLOTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 }
 unsigned long long vk_skips[8]; /* draws not drawn, by reason (renderer_report prints them) */
 static PicaVertex triangles[1 << 18];
+static float gpu_inputs[1 << 20][4];
+
+/* the GPU vertex shaders made, by pica_vertex_shader_key */
+enum { VS_MODULES = 512 };
+static struct { uint64_t key; VkShaderModule module; } vs_modules[VS_MODULES];
+static int vs_module_count;
+unsigned long long vk_draws_gpu_vs, vk_draws_cpu_vs; /* (renderer_report prints them) */
+
+static VkShaderModule vs_module_for(const PicaState* s, uint64_t key)
+{
+    for (int k = 0; k < vs_module_count; k++)
+        if (vs_modules[k].key == key)
+            return vs_modules[k].module;
+    static char glsl[1 << 20];
+    const long len = pica_vertex_shader_glsl(s, glsl, sizeof glsl);
+    VkShaderModule m = len < 0 ? VK_NULL_HANDLE : shader(glsl, (size_t)len, "vert");
+    if (vs_module_count < VS_MODULES) {
+        vs_modules[vs_module_count].key = key;
+        vs_modules[vs_module_count++].module = m;
+    }
+    return m;
+}
+
+/* whether a draw's vertex shader runs on the GPU: only with $HOS_RENDER_GPU_VS for now, and not with a geometry shader,
+   in immediate mode, or when the fragment lighting reads the quaternion (made per triangle on the CPU:
+   PicaVertexShader.h). Off by default: the translation's first form (a loop over a switch, the interpreter written
+   out: ~500 KB of SPIR-V a program) made the opening ~19 times slower here (69 top-screen frames in 120 s against
+   1,301, 6 November), each pipeline compiling the whole program and each vertex stepping through it; on a phone it
+   would stutter at every new pipeline. The structured translation (PicaShaderGlsl.h's later form) is what makes it pay. */
+static int gpu_vertex_path(const PicaState* s, int indexed)
+{
+    static int cpu = -1;
+    if (cpu < 0)
+        cpu = getenv("HOS_RENDER_GPU_VS") == NULL;
+    const uint32_t* r = s->reg;
+    /* (topology 3, "the geometry shader's", with no geometry shader on is a list, as Azahar's assembler takes it) */
+    return !cpu && indexed != 2 && (r[0x229] & 3) != 2 && !(r[0x08F] & 1);
+}
 
 void vk_renderer_draw(PicaState* s, int indexed)
 {
@@ -665,26 +728,46 @@ void vk_renderer_draw(PicaState* s, int indexed)
     drawing_target = t;
     if (t < 0) { vk_skips[0]++; return; }
     targets[t].depth_address = BITS(r[0x11C], 0, 28) * 8;
-    const long n = indexed == 2 ? pica_vertex_immediate(s, triangles, 1 << 18) : pica_vertex_draw(s, indexed, triangles, 1 << 18);
-    if (n <= 0) { if (indexed != 2) vk_skips[n < 0 ? 1 : 2]++; return; } /* (an immediate vertex completing no triangle: none to draw) */
+    VkShaderModule gpu_vs = VK_NULL_HANDLE;
+    uint64_t vs_key = 0;
+    uint32_t inputs = 0;
+    long n;
+    if (gpu_vertex_path(s, indexed)) {
+        vs_key = pica_vertex_shader_key(s);
+        gpu_vs = vs_module_for(s, vs_key);
+    }
+    if (gpu_vs) {
+        inputs = BITS(r[0x2B9], 0, 4) + 1;
+        n = pica_vertex_inputs(s, indexed, gpu_inputs, (1 << 20) / (long)inputs);
+        if (n < 0) { vk_skips[1]++; return; }
+        if (n < 3) { vk_skips[2]++; return; }
+        vk_draws_gpu_vs++;
+    } else {
+        n = indexed == 2 ? pica_vertex_immediate(s, triangles, 1 << 18) : pica_vertex_draw(s, indexed, triangles, 1 << 18);
+        if (n <= 0) { if (indexed != 2) vk_skips[n < 0 ? 1 : 2]++; return; } /* (an immediate vertex completing no triangle: none to draw) */
+        vk_draws_cpu_vs++;
+    }
     static char frag[1 << 17];
     if (getenv("HOS_RENDER_LOOSE") && strstr(getenv("HOS_RENDER_LOOSE"), "alpha"))
         pica_fragment_no_alpha_test = 1;
     const long len = pica_fragment_glsl(s, frag, sizeof frag);
     if (len < 0)
         return;
-    VkPipeline p = pipeline_for(s, frag, len);
+    VkPipeline p = pipeline_for(s, frag, len, gpu_vs, vs_key, inputs);
     if (!p) { vk_skips[3]++; return; }
     if (rings_make())
         return;
-    if (!BITS(r[0x11E], 24, 1)) /* flipped (Azahar's trivial vertex shader: vtx_pos.y = -vtx_pos.y) */
+    if (!gpu_vs && !BITS(r[0x11E], 24, 1)) /* flipped (Azahar's trivial vertex shader: vtx_pos.y = -vtx_pos.y) */
         for (long k = 0; k < n; k++)
             triangles[k].position[1] = -triangles[k].position[1];
-    const VkDeviceSize vbytes = (VkDeviceSize)n * sizeof(PicaVertex);
+    const VkDeviceSize vbytes = gpu_vs ? (VkDeviceSize)n * inputs * 16 : (VkDeviceSize)n * sizeof(PicaVertex);
     if (vertex_used + vbytes > VERTEX_RING || uniform_used == UNIFORM_SLOTS || sets_used == SETS || lut_used == LUT_SLOTS)
         flush(); /* (every ring checked before any is written: a flush frees them all) */
     const VkDeviceSize voffset = vertex_used;
-    memcpy((uint8_t*)vertices.map + voffset, triangles, (size_t)vbytes);
+    memcpy((uint8_t*)vertices.map + voffset, gpu_vs ? (const void*)gpu_inputs : (const void*)triangles, (size_t)vbytes);
+    const VkDeviceSize vsoffset = vs_slot_size * (VkDeviceSize)vs_used++;
+    if (gpu_vs)
+        pica_vertex_shader_uniforms(s, (PicaVertexUniforms*)((uint8_t*)vs_uniforms.map + vsoffset));
     vertex_used += (vbytes + 15) & ~(VkDeviceSize)15;
     const VkDeviceSize uoffset = uniform_slot_size * (VkDeviceSize)uniform_used++;
     PicaFragmentUniforms* const fu = (PicaFragmentUniforms*)((uint8_t*)uniforms.map + uoffset);
@@ -721,14 +804,16 @@ void vk_renderer_draw(PicaState* s, int indexed)
     VK(vkAllocateDescriptorSets(dev, &dai, &set));
     sets_used++;
     VkDescriptorBufferInfo ub = {uniforms.buf, uoff_final, sizeof(PicaFragmentUniforms)},
-                           lb = {luts.buf, (VkDeviceSize)LUT_BYTES * lslot, LUT_BYTES};
-    VkWriteDescriptorSet w[5] = {
+                           lb = {luts.buf, (VkDeviceSize)LUT_BYTES * lslot, LUT_BYTES},
+                           vb = {vs_uniforms.buf, vsoffset, sizeof(PicaVertexUniforms)};
+    VkWriteDescriptorSet w[6] = {
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, set, 5, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, NULL, &vb},
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, set, 0, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, NULL, &ub},
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, set, 1, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, NULL, &lb},
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, set, 2, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &images[0]},
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, set, 3, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &images[1]},
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, set, 4, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &images[2]}};
-    vkUpdateDescriptorSets(dev, 5, w, 0, NULL);
+    vkUpdateDescriptorSets(dev, 6, w, 0, NULL);
 
     record();
     if (open_target != t) { /* (draws to the same target share one render pass, in order) */

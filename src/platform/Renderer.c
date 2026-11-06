@@ -164,7 +164,9 @@ void renderer_report(void)
 {
     fprintf(stderr, "renderer: draws skipped: no target %llu, memory %llu, no triangles %llu, no pipeline %llu; texture units with no texture %llu\n", vk_skips[0], vk_skips[1], vk_skips[2], vk_skips[3], vk_skips[4]);
     extern unsigned long long vk_renderer_submits(void);
-    fprintf(stderr, "renderer: submissions %llu\n", vk_renderer_submits());
+    extern unsigned long long vk_draws_gpu_vs, vk_draws_cpu_vs;
+    fprintf(stderr, "renderer: submissions %llu; draws with the vertex shader on the GPU %llu, on the CPU %llu\n",
+            vk_renderer_submits(), vk_draws_gpu_vs, vk_draws_cpu_vs);
     fprintf(stderr, "renderer: textures decoded again (their bytes changed) %llu, read inside a render target %llu\n", vk_texture_reloads, vk_texture_in_target);
     if (!stats)
         return;

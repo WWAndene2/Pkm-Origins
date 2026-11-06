@@ -34,6 +34,9 @@ struct PicaState {
        given so far, and whether the primitive assembly starts afresh (0x232, 0x25E or 0x25F written) */
     float immediate[16][4];
     int immediate_count, immediate_reset;
+    /* changed whenever a word of the vertex shader's program or operand descriptors changes: the GPU vertex shader
+       made from them is kept while it stays (VulkanRenderer.c) */
+    uint32_t vs_version;
     /* the caller's: a draw (indexed 0 or 1; 2: an immediate-mode vertex formed, in state->immediate), with the state as
        it stands; the words of a command buffer the GPU jumps to
        (physical address and size in bytes), or NULL when not reachable */

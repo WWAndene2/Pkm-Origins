@@ -157,6 +157,7 @@ static void write(PicaState* s, uint32_t id, uint32_t value, uint32_t mask, cons
         return;
     case 0x2CC: case 0x2CD: case 0x2CE: case 0x2CF: case 0x2D0: case 0x2D1: case 0x2D2: case 0x2D3:
         if (s->reg[0x2CB] < 512) {
+            if (s->vs.code[s->reg[0x2CB]] != v) s->vs_version++;
             s->vs.code[s->reg[0x2CB]] = v;
             if (shared_with_gs(s)) s->gs.code[s->reg[0x2CB]] = v;
             s->reg[0x2CB]++;
@@ -167,6 +168,7 @@ static void write(PicaState* s, uint32_t id, uint32_t value, uint32_t mask, cons
         return;
     case 0x2D6: case 0x2D7: case 0x2D8: case 0x2D9: case 0x2DA: case 0x2DB: case 0x2DC: case 0x2DD:
         if (s->reg[0x2D5] < PICA_SWIZZLES) {
+            if (s->vs.swizzle[s->reg[0x2D5]] != v) s->vs_version++;
             s->vs.swizzle[s->reg[0x2D5]] = v;
             if (shared_with_gs(s)) s->gs.swizzle[s->reg[0x2D5]] = v;
             s->reg[0x2D5]++;
