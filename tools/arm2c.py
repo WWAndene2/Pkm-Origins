@@ -1293,7 +1293,10 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         out.append("    uint32_t jt;")
         done = sorted({a for a, _ in body if a < end_code})
         cases = " ".join("case 0x%Xu: goto L%X;" % (x, x) for x in done)
-        dispatch = ("DISPATCH: switch (jt - %s) { %s default: break; } call_indirect(c, jt, ret); return;"
+        # (a target that is the return address is the return itself: lr copied to another register and jumped to,
+        # mov pc, r6; ORAS's video decoder returns so to 001BCD54. Else, out of the function, a tail call; past the
+        # frames above, the unwind of the wrapper)
+        dispatch = ("DISPATCH: switch (jt - %s) { %s default: break; } if (jt == ret) return; call_indirect(c, jt, ret); return;"
                     % (ADDR(0), cases))
         targets.update(done)
     # (a return-address fault records where it happened: r15 the instruction's address)
