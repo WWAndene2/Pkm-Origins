@@ -210,6 +210,24 @@ static void run(HosThread* t)
     fesetround(FE_TOWARDZERO); /* the host's rounding as the thread's FPSCR (0x03C00010: toward zero) */
     c->r[14] = THREAD_RETURN;
     call_indirect(c, t->entry, THREAD_RETURN);
+    /* a return to an address no frame above was called from (fault 3, c->unwind): the C frames are all gone, and
+       the CPU just goes on there; so does the thread, at that address's code when there is some (ORAS's thread
+       exit: its last function run on a stack of its own returns to 00131FD8, the svc ExitThread of the start
+       routine). Nothing there: the fault stays, reported below. */
+    while (c->fault == 3 && c->unwind) {
+        const uint32_t to = c->unwind;
+        const int keep_fault = c->fault;
+        const uint32_t keep_pc = c->r[15];
+        c->fault = 0;
+        c->unwind = 0;
+        call_indirect(c, to, THREAD_RETURN);
+        if (c->fault == 4) { /* (no code translated there: the original fault) */
+            c->fault = keep_fault;
+            c->unwind = to;
+            c->r[15] = keep_pc;
+            break;
+        }
+    }
     if (c->fault) {
         char at[96] = "", from[96] = "";
         hos_ldr_place(c->r[15], at, sizeof at);

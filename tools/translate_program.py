@@ -37,6 +37,31 @@ def translate_one(s, end=None, is_thumb=None):
 
 
 
+def literal_code_addresses(code, base, starts, size, arm):
+    """the addresses inside ARM functions (not their starts, word-aligned) that a literal pool holds, a word loaded by
+    ldr rX, [pc, #n]: code the program jumps or returns to by an address it keeps (ORAS's thread start routine
+    00131F98: the exit routine keeps 00131FD8, its svc ExitThread, and runs the thread's last function on a stack
+    of its own returning there, 001C15C0). Each becomes an entry (157 in ORAS's .code: an entry never reached costs
+    nothing)"""
+    import struct
+    starts_set, out = set(starts), set()
+    for off in range(0, len(code) - 3, 4):
+        ins = struct.unpack_from("<I", code, off)[0]
+        if ins >> 28 == 0xF or (ins & 0x0F7F0000) != 0x051F0000:  # ldr rX, [pc, #+-imm12]
+            continue
+        imm = ins & 0xFFF
+        o = off + 8 + (imm if ins >> 23 & 1 else -imm)
+        if not 0 <= o <= len(code) - 4:
+            continue
+        w = struct.unpack_from("<I", code, o)[0]
+        if w % 4 or w in starts_set or not base <= w < base + len(code):
+            continue
+        k = bisect.bisect(starts, w) - 1
+        if k >= 0 and starts[k] in arm and starts[k] < w < starts[k] + (size.get(starts[k]) or 0):
+            out.add(w)
+    return out
+
+
 def load_regions(functions_tsv):
     """the regions of hand-written code beside a function list (<game>_functions.tsv: <game>_asm_regions.tsv), as
     [(start, end)]; none when there is no such file"""
@@ -96,8 +121,11 @@ def translate_program(code, base, starts, size, thumb, relocated, module=None, j
     # the entries inside functions their branches reach (shared tails), translated as functions of their own, from
     # there to the end of the function holding them, until none is new (an entry's code may branch into another)
     entry_thumb = set()
+    literals = literal_code_addresses(code, base, starts, size, arm) if module is None else set()
     while True:
         new = {t for d in deps.values() for t in d if t not in funcs and t not in why and t not in size}
+        new |= {t for t in literals if t not in funcs and t not in why}
+        literals = set()
         if not new:
             break
         for t in sorted(new):
