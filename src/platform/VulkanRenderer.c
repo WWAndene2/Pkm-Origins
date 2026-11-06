@@ -715,3 +715,17 @@ void vk_renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t wid
         submit();
     }
 }
+
+unsigned long long vk_copies_into_target;
+
+void vk_renderer_copied(uint32_t address, uint32_t bytes)
+{
+    for (int k = 0; k < TARGETS; k++)
+        if (targets[k].used && address < targets[k].address + targets[k].width * targets[k].height * 4 &&
+            targets[k].address < address + bytes) {
+            if (!vk_copies_into_target++)
+                fprintf(stderr, "renderer: a copy into the render target %08X (%08X, %u bytes): not loaded into its "
+                        "image yet\n", targets[k].address, address, bytes);
+            return;
+        }
+}

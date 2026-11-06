@@ -28,4 +28,8 @@ void vk_renderer_display(uint32_t source);
    its depth buffer cleared when the fill covers it */
 void vk_renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t width_bits);
 
+/* the game's memory written by a copy (physical address, bytes): a render target it falls in is told (counted; its
+   image is not yet loaded back from memory) */
+void vk_renderer_copied(uint32_t address, uint32_t bytes);
+
 #endif

@@ -19,6 +19,8 @@ void renderer_display(uint32_t source);
 
 /* GSP's memory fill of virtual start-end with value (width_bits as its control's bits 8-9) */
 void renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t width_bits);
+/* the game's memory written by a copy of the GSP (a texture copy): from start, bytes long (game addresses) */
+void renderer_copied(uint32_t start, uint32_t bytes);
 
 /* at exit: the census, if asked */
 void renderer_report(void);

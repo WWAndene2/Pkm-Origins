@@ -63,6 +63,35 @@ static void signal(int interrupt)
         signal_for(rights, interrupt);
 }
 
+/* a texture copy (Azahar's SwBlitter::TextureCopy): size bytes (16-byte aligned) from input to output, each side
+   copying width bytes then skipping gap bytes (both in 16-byte units; a zero gap is contiguous). It was only
+   acknowledged before. ORAS sends none through the opening and the title movie (counted, 6 November); a copy into a
+   render target is reported by the renderer, whose image is not loaded back from memory yet. */
+static void texture_copy(uint32_t from, uint32_t to, uint32_t size, uint32_t in_wg, uint32_t out_wg)
+{
+    uint32_t left = size & ~15u;
+    const uint32_t in_gap = (in_wg >> 16) * 16, out_gap = (out_wg >> 16) * 16;
+    const uint32_t in_w = in_gap ? (in_wg & 0xFFFF) * 16 : left, out_w = out_gap ? (out_wg & 0xFFFF) * 16 : left;
+    if (!left || !in_w || !out_w) /* (the hardware freezes on these: nothing done) */
+        return;
+    uint8_t *s = hos_pointer(from), *d = hos_pointer(to);
+    uint32_t in_left = in_w, out_left = out_w;
+    while (left) {
+        uint32_t n = in_left < out_left ? in_left : out_left;
+        if (n > left)
+            n = left;
+        memmove(d, s, n);
+        s += n;
+        d += n;
+        in_left -= n;
+        out_left -= n;
+        left -= n;
+        if (!in_left) { in_left = in_w; s += in_gap; }
+        if (!out_left) { out_left = out_w; d += out_gap; }
+    }
+    renderer_copied(to, (uint32_t)(d - (uint8_t*)hos_pointer(to)));
+}
+
 void hos_gsp_report(void);
 
 static void vblank(void)
@@ -178,10 +207,14 @@ static void trigger_cmd_req_queue(HosRequest* q)
                 signal(PSC1);
             break;
         case 3: /* DisplayTransfer: input, output, sizes, flags */
-            renderer_display(w[1]);
-            signal(PPF);
-            break;
-        case 4: /* TextureCopy */
+        case 4: /* TextureCopy: input, output, size, input width / gap, output width / gap, flags */
+            /* (either command is a texture copy when its flags say so, bit 3, as Azahar's MemoryTransfer decides: a
+               DisplayTransfer's flags are its w[5], a TextureCopy's its w[6]) */
+            if ((w[0] & 0xFF) == 4 ? w[6] >> 3 & 1 : w[5] >> 3 & 1)
+                texture_copy(w[1], w[2], (w[0] & 0xFF) == 4 ? w[3] : 0, (w[0] & 0xFF) == 4 ? w[4] : 0,
+                             (w[0] & 0xFF) == 4 ? w[5] : 0);
+            else
+                renderer_display(w[1]);
             signal(PPF);
             break;
         default: /* CacheFlush */
