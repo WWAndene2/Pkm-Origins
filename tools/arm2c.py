@@ -707,11 +707,45 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
     end_code = insns[-1].address + insns[-1].size if insns else start
     computed = []
 
+    def preset_return(k):
+        """the return address set by hand just before the computed jump at insns[k]: add lr, pc, #n (or mov lr, pc)
+        within the 4 instructions before it, with no branch and no other write to lr between; else None. Hand-written
+        code calls through a table so (ORAS's video decoder at 001BCE18: add lr, pc, #0x1c, then add pc, ip, r5, the
+        callee returning by mov pc, lr to 001BCE40, inside the next function of the list)"""
+        for j in range(k - 1, max(-1, k - 5), -1):
+            p = insns[j]
+            ops_ = p.operands
+            dst_lr = len(ops_) > 0 and ops_[0].type == ARM_OP_REG and p.reg_name(ops_[0].reg) == "lr"
+            if p.mnemonic == "add" and dst_lr and len(ops_) == 3 and ops_[1].type == ARM_OP_REG \
+                    and p.reg_name(ops_[1].reg) == "pc" and ops_[2].type == ARM_OP_IMM:
+                return (pc_of(p.address) + ops_[2].imm) & 0xFFFFFFFF
+            if p.mnemonic == "mov" and dst_lr and len(ops_) == 2 and ops_[1].type == ARM_OP_REG \
+                    and p.reg_name(ops_[1].reg) == "pc":
+                return pc_of(p.address)
+            if p.mnemonic.startswith(("b", "pop", "ldm")) or (dst_lr and not p.mnemonic.startswith(("st", "push", "cmp", "tst"))):
+                return None
+        return None
+
     def jump(expr):
         """a computed jump (add pc, ... / mov pc, rN / ldr pc, ...): to any instruction of this function by a switch
-        on the target, else out of it as a tail call through call_indirect"""
+        on the target, else out of it as a tail call through call_indirect; a call when the code set lr just before
+        (preset_return), going on at that address after it"""
         if thumb:
             raise Unsupported("computed jump in Thumb")
+        back = preset_return(k_)
+        if back is not None:
+            if start <= back < end_code:
+                targets.add(back)
+                after = "goto L%X;" % back
+            elif entries is not None:  # (inside another function: its own entry, as a branch there is)
+                if not is_start(back, thumb):
+                    entries.add(back)
+                callees.add(back)
+                after = "%s(c, ret); return;" % fname(back, module)
+            else:
+                raise Unsupported("call by a computed jump returning outside the function")
+            return "{ uint32_t t = %s; c->r[14] = %s; call_indirect(c, t, %s); if (c->fault) return; %s }" % (
+                expr, ADDR(back), ADDR(back), after)
         computed.append(True)
         # (the cases: every instruction translated, filled in once the function is: code past its last return, which
         # only such a jump could reach, is not decoded, as data may follow; a jump there is a tail call through
