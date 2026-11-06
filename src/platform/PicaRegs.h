@@ -30,7 +30,12 @@ struct PicaState {
     /* the packing queues of the float uniforms and default attributes */
     uint32_t vs_queue[4], gs_queue[4], attr_queue[3];
     int vs_queued, gs_queued, attr_queued;
-    /* the caller's: a draw (indexed or not), with the state as it stands; the words of a command buffer the GPU jumps to
+    /* immediate mode (default attribute index 0xF, Azahar's SubmitImmediate): the vertex being formed, its attributes
+       given so far, and whether the primitive assembly starts afresh (0x232, 0x25E or 0x25F written) */
+    float immediate[16][4];
+    int immediate_count, immediate_reset;
+    /* the caller's: a draw (indexed 0 or 1; 2: an immediate-mode vertex formed, in state->immediate), with the state as
+       it stands; the words of a command buffer the GPU jumps to
        (physical address and size in bytes), or NULL when not reachable */
     void (*draw)(PicaState* state, int indexed, void* user);
     const uint32_t* (*memory)(uint32_t physical, uint32_t bytes, void* user);

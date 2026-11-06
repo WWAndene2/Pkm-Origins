@@ -88,14 +88,28 @@ static void write(PicaState* s, uint32_t id, uint32_t value, uint32_t mask, cons
     s->reg[id] = (s->reg[id] & ~m) | (value & m);
     const uint32_t v = s->reg[id];
     switch (id) {
-    case 0x232: s->attr_queued = 0; return;
+    case 0x232: s->attr_queued = 0; s->immediate_count = 0; s->immediate_reset = 1; return;
+    case 0x25E: case 0x25F: s->immediate_reset = 1; return; /* (the topology, a primitive restarted) */
     case 0x233: case 0x234: case 0x235: {
         s->attr_queue[s->attr_queued++] = v;
         if (s->attr_queued == 3) {
             s->attr_queued = 0;
             const uint32_t index = s->reg[0x232] & 0xF;
-            unpack(s->attr_queue, 0, s->default_attribute[index]);
-            s->reg[0x232] = (s->reg[0x232] & ~0xFu) | ((index + 1) & 0xF);
+            if (index < 0xF) {
+                unpack(s->attr_queue, 0, s->default_attribute[index]);
+                s->reg[0x232] = (s->reg[0x232] & ~0xFu) | (index + 1);
+                return;
+            }
+            /* index 0xF: immediate mode, the attributes of a vertex given one by one; the last
+               (max_input_attrib_index, 0x242) forms it, drawn by the caller (Azahar's DrawImmediate) */
+            unpack(s->attr_queue, 0, s->immediate[s->immediate_count & 15]);
+            if ((uint32_t)s->immediate_count < (s->reg[0x242] & 0xF)) {
+                s->immediate_count++;
+                return;
+            }
+            s->immediate_count = 0;
+            if (s->draw)
+                s->draw(s, 2, s->user);
         }
         return;
     }

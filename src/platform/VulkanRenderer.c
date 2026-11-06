@@ -573,8 +573,8 @@ void vk_renderer_draw(PicaState* s, int indexed)
     drawing_target = t;
     if (t < 0) { vk_skips[0]++; return; }
     targets[t].depth_address = BITS(r[0x11C], 0, 28) * 8;
-    const long n = pica_vertex_draw(s, indexed, triangles, 1 << 18);
-    if (n <= 0) { vk_skips[n < 0 ? 1 : 2]++; return; }
+    const long n = indexed == 2 ? pica_vertex_immediate(s, triangles, 1 << 18) : pica_vertex_draw(s, indexed, triangles, 1 << 18);
+    if (n <= 0) { if (indexed != 2) vk_skips[n < 0 ? 1 : 2]++; return; } /* (an immediate vertex completing no triangle: none to draw) */
     static char frag[1 << 17];
     if (getenv("HOS_RENDER_LOOSE") && strstr(getenv("HOS_RENDER_LOOSE"), "alpha"))
         pica_fragment_no_alpha_test = 1;

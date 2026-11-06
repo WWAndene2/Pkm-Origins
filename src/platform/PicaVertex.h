@@ -26,4 +26,8 @@ typedef struct {
    the memory the draw reads is not reachable */
 long pica_vertex_draw(PicaState* state, int indexed, PicaVertex* out, long max);
 
+/* an immediate-mode vertex (state->immediate, PicaRegs.c): the triangles it completes (0, or 3 vertices or more with a
+   geometry shader) into out, the assembly kept between calls */
+long pica_vertex_immediate(PicaState* state, PicaVertex* out, long max);
+
 #endif

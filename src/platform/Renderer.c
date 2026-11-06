@@ -93,7 +93,7 @@ static void on_draw(PicaState* s, int indexed, void* user)
         return;
     }
     static PicaVertex verts[1 << 16];
-    const long n = pica_vertex_draw(s, indexed, verts, 1 << 16);
+    const long n = indexed == 2 ? pica_vertex_immediate(s, verts, 1 << 16) : pica_vertex_draw(s, indexed, verts, 1 << 16);
     if (n < 0)
         count("vertices: memory not reachable");
     else {

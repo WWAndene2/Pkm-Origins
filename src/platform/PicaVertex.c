@@ -193,6 +193,58 @@ static void gs_vertex(PicaState* s, GsPipeline* g, const float attr[16][4])
     gs_run(s);
 }
 
+/* the vertex shader on one vertex's inputs (the loaders' attributes or immediate mode's), its outputs in order of the
+   output mask (ShaderUnit::LoadInput, Run, WriteOutput) */
+static void run_vertex_shader(PicaState* s, const float input[16][4], float attr[16][4])
+{
+    const uint32_t* r = s->reg;
+    const uint32_t max_input = BITS(r[0x2B9], 0, 4);
+    const uint64_t input_map = (uint64_t)r[0x2BC] << 32 | r[0x2BB];
+    const uint32_t output_mask = r[0x2BD] & 0xFFFF, entry = r[0x2BA] & 0xFFFF;
+    PicaShaderUnit u;
+    memset(&u, 0, sizeof u);
+    for (uint32_t a = 0; a <= max_input; a++)
+        memcpy(u.input[input_map >> (4 * a) & 0xF], input[a], sizeof input[a]);
+    pica_shader_run(&s->vs, &u, entry, 1u << 20);
+    memset(attr, 0, 16 * sizeof attr[0]);
+    int n_out = 0;
+    for (int reg = 0; reg < 16; reg++)
+        if (output_mask >> reg & 1)
+            memcpy(attr[n_out++], u.output[reg], sizeof attr[0]);
+}
+
+/* immediate mode (PicaRegs.c: a vertex formed in state->immediate): its triangles as they complete, the primitive
+   assembly kept from one vertex to the next (and the geometry pipeline), started afresh when state->immediate_reset
+   says so (Azahar's DrawImmediate and the assembler it shares with the draws) */
+long pica_vertex_immediate(PicaState* s, PicaVertex* out, long max)
+{
+    static Assembler assembler;
+    static GsPipeline gs;
+    const uint32_t* r = s->reg;
+    if (s->immediate_reset) {
+        memset(&assembler, 0, sizeof assembler);
+        assembler.topology = BITS(r[0x25E], 8, 2);
+        gs_configure(s, &gs);
+        s->immediate_reset = 0;
+    }
+    assembler.out = out;
+    assembler.written = 0;
+    assembler.max = max;
+    emit_target.r = r;
+    emit_target.assembler = &assembler;
+    float attr[16][4];
+    run_vertex_shader(s, (const float (*)[4])s->immediate, attr);
+    if (gs.on) {
+        gs_vertex(s, &gs, (const float (*)[4])attr);
+    } else {
+        PicaVertex v;
+        to_vertex(r, (const float (*)[4])attr, &v);
+        assemble(&assembler, &v);
+    }
+    emit_target.assembler = NULL;
+    return assembler.written;
+}
+
 long pica_vertex_draw(PicaState* s, int indexed, PicaVertex* out, long max)
 {
     const uint32_t* r = s->reg;
@@ -284,17 +336,7 @@ long pica_vertex_draw(PicaState* s, int indexed, PicaVertex* out, long max)
                 for (uint32_t c = elements[a]; c < 4; c++)
                     input[a][c] = c == 3 ? 1.0f : 0.0f;
             }
-            PicaShaderUnit u;
-            memset(&u, 0, sizeof u);
-            for (uint32_t a = 0; a <= max_input; a++)
-                memcpy(u.input[input_map >> (4 * a) & 0xF], input[a], sizeof input[a]);
-            pica_shader_run(&s->vs, &u, entry, 1u << 20);
-            /* ShaderUnit::WriteOutput: the outputs in order of the mask */
-            memset(attr, 0, sizeof attr);
-            int n_out = 0;
-            for (int reg = 0; reg < 16; reg++)
-                if (output_mask >> reg & 1)
-                    memcpy(attr[n_out++], u.output[reg], sizeof attr[0]);
+            run_vertex_shader(s, (const float (*)[4])input, attr);
             if (indexed) {
                 cache[cache_pos].valid = 1;
                 cache[cache_pos].id = vertex;
