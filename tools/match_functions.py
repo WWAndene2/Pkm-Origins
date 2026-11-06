@@ -67,7 +67,7 @@ PRELUDE = r"""
 #include <string.h>
 #include <math.h>
 #include <fenv.h>
-typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; uint32_t tls, mon, mon_addr, depth; } Cpu;
+typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; uint32_t tls, mon, mon_addr, depth; uint32_t unwind; } Cpu;
 /* memory regions: 0 is the random test memory, the others the game's memory (--ram), whose writes are logged (address,
    old byte) so that a trial can be compared on what it wrote and undone after */
 extern uint8_t* RP[8]; extern uint32_t RB[8], RS[8]; extern int NR;

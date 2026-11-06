@@ -24,6 +24,7 @@ typedef struct {
     uint32_t steps;
     uint32_t s[32], fpscr;
     uint32_t tls, mon, mon_addr, depth;
+    uint32_t unwind; /* a return to an address its caller did not call from (fault 3): that address, for the frames above */
 } Cpu;
 
 extern uint8_t* hos_memory;

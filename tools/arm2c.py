@@ -8,7 +8,7 @@ never translated approximately. Matched against the original by tools/match_func
   arm2c.py <code.bin> <address, hex> [--functions LIST] [--cro DIR] [--end ADDRESS]
       prints the C of one function (or why it is unsupported), and the functions it calls
 
-The C uses: typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; uint32_t tls, mon, mon_addr, depth; } Cpu; and the memory helpers ld8/ld16/ld32,
+The C uses: typedef struct { uint32_t r[16]; uint32_t n, z, c, v; int fault; uint32_t steps; uint32_t s[32], fpscr; uint32_t tls, mon, mon_addr, depth; uint32_t unwind; } Cpu; and the memory helpers ld8/ld16/ld32,
 st8/st16/st32 (tools/match_functions.py defines them: a fault flag instead of undefined behaviour out of the test memory).
 """
 import argparse
@@ -797,7 +797,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             elif base_m == "bx" and i.reg_name(ops[0].reg) == "lr":
                 # the C returns to its caller: right only when lr is the address this function got (a shared epilogue pops
                 # lr from the stack: X's 00205E20); otherwise fault 3, never a silent other path
-                line.append("if (c->r[14] != ret) { c->fault = 3; return; } return;")
+                line.append("if (c->r[14] != ret) { c->unwind = c->r[14]; c->fault = 3; return; } return;")
                 returned = i.cc in (0, 15)
             elif (base_m == "bx" and ops[0].type == ARM_OP_REG and not thumb and prev is not None
                   and prev.mnemonic.startswith("ldr") and prev.operands[0].type == ARM_OP_REG
@@ -877,7 +877,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 if load and 15 in regs:
                     # the popped pc must be the return address this function got: a test whose stores overwrote it has no
                     # meaning (the original would jump elsewhere); fault 3 makes the trial invalid
-                    line.append(" if (c->r[15] != ret) { c->fault = 3; return; } return;")
+                    line.append(" if (c->r[15] != ret) { c->unwind = c->r[15]; c->fault = 3; return; } return;")
                     returned = i.cc in (0, 15)
             elif thumb and base_m in ("lsl", "lsr", "asr", "ror") and len(ops) == 2 and ops[1].type == ARM_OP_REG:
                 # Thumb's lsls rd, rs: rd shifted by rs
@@ -932,7 +932,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             elif base_m in ("mov", "mvn") and rd() == 15:
                 if base_m == "mov" and ops[1].type == ARM_OP_REG and i.reg_name(ops[1].reg) == "lr" and not ops[1].shift.type \
                         and not i.update_flags:  # mov pc, lr: a return (ARMv4's)
-                    line.append("if (c->r[14] != ret) { c->fault = 3; return; } return;")
+                    line.append("if (c->r[14] != ret) { c->unwind = c->r[14]; c->fault = 3; return; } return;")
                 elif i.update_flags:
                     raise Unsupported("write to pc with flags (an exception return)")
                 else:
@@ -1065,7 +1065,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                     if base_m == "ldr" and basereg == "sp" and post and ops[2].type == ARM_OP_IMM and i.cc in (0, 15):
                         # ldr pc, [sp], #4: pop {pc}, a return
                         line.append("{ uint32_t v = ld32(c, c->r[13]); if (c->fault) return; c->r[13] += 0x%Xu;"
-                                    " if (v != ret) { c->fault = 3; return; } } return;" % (ops[2].imm & 0xFFFFFFFF))
+                                    " if (v != ret) { c->unwind = v; c->fault = 3; return; } } return;" % (ops[2].imm & 0xFFFFFFFF))
                         body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, "".join(line))))
                         returned = True
                         if max(targets, default=0) <= i.address:
@@ -1223,7 +1223,11 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
     if dispatch:
         out.append(dispatch)
     out.append("}")
+    # a return past this frame (fault 3 with c->unwind set: code that returns to its caller's caller, as ORAS's video
+    # decoder at 001BF58C pops the return address its caller pushed): the frame whose return address it is takes it as
+    # its own return, and its caller goes on; with none, the fault stays (a wrong return address, as before)
     out.append("void %s(Cpu* c, uint32_t ret)\n{\n    HOS_ENTER(c);\n    HOS_FN_IN(%s);\n    %s_body(c, ret);\n"
+               "    if (c->fault == 3 && c->unwind == ret) { c->fault = 0; c->unwind = 0; }\n"
                "    HOS_FN_OUT();\n    HOS_LEAVE(c);\n}\n" % (name, ADDR(start), name))
     return "\n".join(out), 4 * len(body)
 
