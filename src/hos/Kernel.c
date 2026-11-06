@@ -121,6 +121,12 @@ void hos_svc(Cpu* c, uint32_t n)
     uint32_t* r = c->r;
     HosObject* o;
     pthread_mutex_lock(&hos_lock);
+    if (hos_current != t) { /* a check: only the thread holding the CPU runs game code */
+        static int told;
+        if (told++ < 20)
+            fprintf(stderr, "hos: thread %u made a system call (%02X, lr %08X) without holding the CPU (thread %u does)\n",
+                    t ? t->id : 0, n, r[14], hos_current ? hos_current->id : 0);
+    }
     /* HOS_TRACE=1: each call printed as Pomegrade's code trace records Azahar's (tools/hos_trace_compare.py) */
     static int trace = -1;
     if (trace < 0)

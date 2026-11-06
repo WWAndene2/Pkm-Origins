@@ -16,6 +16,8 @@
 #include <fenv.h>
 #include <time.h>
 
+volatile int hos_preempt_pending; /* a thread outranking the running one made ready from outside its system calls */
+
 pthread_mutex_t hos_lock = PTHREAD_MUTEX_INITIALIZER;
 HosThread* hos_current;
 
@@ -123,8 +125,14 @@ static void dispatch(void)
 
 static void wait_cpu(HosThread* t)
 {
-    while (hos_current != t)
+    int waited = 0;
+    while (hos_current != t) {
         pthread_cond_wait(&t->wake, &hos_lock);
+        waited = 1;
+    }
+    if (waited)
+        t->cpu.mon = 0; /* the kernel's clrex on a thread switch: an ldrex from before the switch no longer lets the
+                           strex after it succeed (another thread may have taken the lock in between) */
 }
 
 void hos_block(HosThread* t)
@@ -167,6 +175,20 @@ void hos_make_ready(HosThread* t)
         return;
     }
     enqueue(t, 0);
+    if (t->priority < cur->priority)
+        hos_preempt_pending = 1; /* (the running thread hands over the CPU at its next loop head or system call) */
+}
+
+
+/* a loop head of the translated code, the flag set: the CPU to the thread that outranks this one, if one is ready */
+void hos_preempt_point(Cpu* c)
+{
+    pthread_mutex_lock(&hos_lock);
+    hos_preempt_pending = 0;
+    HosThread* t = hos_thread_of(c);
+    if (t && hos_current == t)
+        hos_preempt_check(t);
+    pthread_mutex_unlock(&hos_lock);
 }
 
 /* called at the end of each system call: a thread the clock woke that outranks the caller takes the CPU */

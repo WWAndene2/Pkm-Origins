@@ -64,7 +64,12 @@ void call_indirect(Cpu* c, uint32_t t, uint32_t ret);
 #define HOS_ENTER(c) do { if (++(c)->depth > 2000) { (c)->fault = 2; (c)->depth--; return; } } while (0)
 #define HOS_LEAVE(c) ((c)->depth--)
 #else
-#define HOS_STEP(c) ((void)0)
+/* the game: at each loop head, the CPU handed to a thread that outranks this one when one was woken from outside a
+   system call (the clock, a service's host thread): the 3DS preempts at once, and a thread waiting in a loop with no
+   system call (a spin on memory another thread writes) otherwise kept the CPU for good (src/hos/Thread.c) */
+extern volatile int hos_preempt_pending;
+void hos_preempt_point(Cpu* c);
+#define HOS_STEP(c) do { if (__builtin_expect(hos_preempt_pending, 0)) hos_preempt_point(c); } while (0)
 #define HOS_ENTER(c) ((void)0)
 #define HOS_LEAVE(c) ((void)0)
 #endif
