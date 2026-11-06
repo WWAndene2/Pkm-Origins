@@ -29,11 +29,35 @@ static uint32_t next_id = 1;
 /* the address a thread's entry function returns to: no code is there; reaching it ends the thread */
 enum { THREAD_RETURN = 0xFFFFFFF0u };
 
+/* the game's time: the host's monotonic clock, or with $HOS_TIME_SCALE=<factor> that clock slowed (0.1: ten times
+   slower), so that a slow host (rendering on a software GPU) never makes the game drop frames: its frame n is then the
+   frame n of a full-speed run, which the comparisons with Azahar need (tools/frame_compare.py) */
+static double time_scale = -1;
+static int64_t time_origin;
+
 int64_t hos_now_ns(void)
 {
+#define scale time_scale
+#define origin time_origin
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+    const int64_t real = (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+    if (scale < 0) {
+        const char* f = getenv("HOS_TIME_SCALE");
+        scale = f ? atof(f) : 1.0;
+        if (scale <= 0)
+            scale = 1.0;
+        origin = real;
+    }
+    return scale == 1.0 ? real : origin + (int64_t)((double)(real - origin) * scale);
+#undef scale
+#undef origin
+}
+
+/* a game time as the host's monotonic time (for the clock thread's sleep) */
+static int64_t host_ns(int64_t game)
+{
+    return time_scale <= 0 || time_scale == 1.0 ? game : time_origin + (int64_t)((double)(game - time_origin) / time_scale);
 }
 
 uint64_t hos_ticks(void)
@@ -311,7 +335,8 @@ static void* clock_main(void* p)
                 next = periodic[i].next;
         if (!next || next - now > 100000000)
             next = now + 100000000; /* (at least every 0.1 s) */
-        struct timespec ts = {(time_t)(next / 1000000000), (long)(next % 1000000000)};
+        const int64_t wake = host_ns(next);
+        struct timespec ts = {(time_t)(wake / 1000000000), (long)(wake % 1000000000)};
         pthread_cond_timedwait(&clock_cond, &hos_lock, &ts);
     }
     return NULL;
