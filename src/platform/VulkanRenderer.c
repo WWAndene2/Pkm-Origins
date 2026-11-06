@@ -282,11 +282,34 @@ static uint64_t hash_bytes(const uint8_t* p, size_t n)
     return h;
 }
 
+/* $HOS_TEXTURE_DIR: each texture decoded, as tex_<frame>_<address>_f<format>_<w>x<h>.ppm (alpha left out), its rows as
+   in memory (the image the right way up to the eye, before the turn for Vulkan's v). To tell a decoding fault from a
+   placing one (6 November: the decoded eye sheet, hat and face were right; their placement on the models was not). */
+static void texture_save(int k, const uint8_t* rgba)
+{
+    static const char* dir;
+    static int checked;
+    if (!checked) { dir = getenv("HOS_TEXTURE_DIR"); checked = 1; }
+    if (!dir)
+        return;
+    char path[600];
+    snprintf(path, sizeof path, "%s/tex_%04u_%08X_f%u_%ux%u.ppm", dir, frame_count, textures[k].address,
+             textures[k].format, textures[k].width, textures[k].height);
+    FILE* f = fopen(path, "wb");
+    if (!f)
+        return;
+    fprintf(f, "P6 %u %u 255\n", textures[k].width, textures[k].height);
+    for (uint32_t i = 0; i < textures[k].width * textures[k].height; i++)
+        fwrite(rgba + 4 * i, 1, 3, f);
+    fclose(f);
+}
+
 static int texture_upload(int k, const uint8_t* data)
 {
     if (!staging.buf && make_buffer(&staging, 1024 * 1024 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT))
         return 0;
     pica_texture_decode(textures[k].format, data, textures[k].width, textures[k].height, staging.map);
+    texture_save(k, staging.map);
     /* the rows turned over: the PICA's t = 0 is the texture's last row in memory (Azahar's rasterizer reads row
        height - 1 - t), Vulkan's v = 0 the image's first; read as it lay, every model had its textures upside down
        (closed eyes instead of open ones from the eye sheet, the hat's hair on its top, the title text mirrored) */
