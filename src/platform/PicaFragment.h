@@ -46,6 +46,9 @@ void pica_fragment_uniforms(const PicaState* state, PicaFragmentUniforms* u);
 /* the lighting tables as the shader reads them: 24 x 256 (value, difference) */
 void pica_fragment_luts(const PicaState* state, float out[24 * 256][2]);
 
+/* a diagnostic: the alpha test left out when set */
+extern int pica_fragment_no_alpha_test;
+
 /* half and 20-bit floats of the PICA200 (Azahar's f16, f20) */
 float pica_float16(uint32_t raw);
 float pica_float20(uint32_t raw);

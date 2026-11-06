@@ -395,7 +395,7 @@ static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
     uint64_t key = 1469598103934665603ull;
     for (long k = 0; k < len; k++)
         key = (key ^ (uint8_t)frag[k]) * 1099511628211ull;
-    const uint32_t words[] = {r[0x040], r[0x100], r[0x101], r[0x102], r[0x105], r[0x106], r[0x107], r[0x112],
+    const uint32_t words[] = {r[0x040], r[0x100], r[0x101], r[0x102], r[0x105], r[0x106], r[0x107], r[0x112], r[0x11E] >> 24 & 1,
                               r[0x113], r[0x114], r[0x115], r[0x116]};
     for (unsigned k = 0; k < sizeof words / 4; k++)
         key = (key ^ words[k]) * 1099511628211ull;
@@ -427,10 +427,11 @@ static VkPipeline pipeline_for(const PicaState* s, const char* frag, long len)
     rs.lineWidth = 1;
     /* culling (0x040: 0 keep all, 1 keep clockwise, 2 keep counter-clockwise) */
     const uint32_t cull = BITS(r[0x040], 0, 2);
-    rs.cullMode = cull == 0 ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
-    /* (the PICA's orientation as seen in Vulkan's framebuffer, y down: the opposite of its own; checked on ORAS's
-       opening, 5 November: the other way culled the ground and the plants) */
-    rs.frontFace = cull == 1 ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
+    /* the framebuffer's flip bit (0x11E bit 24 clear: flipped): the vertices' y negated (vk_renderer_draw) and the
+       other face culled, as Azahar's PicaToVK::CullMode */
+    const int flipped = !BITS(r[0x11E], 24, 1);
+    rs.cullMode = cull == 0 || cull == 3 ? VK_CULL_MODE_NONE : flipped ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;
+    rs.frontFace = cull == 2 ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE; /* (PicaToVK::FrontFace) */
     VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, NULL, 0, VK_SAMPLE_COUNT_1_BIT};
     VkPipelineDepthStencilStateCreateInfo ds = {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
     const uint32_t d = r[0x107];
@@ -492,6 +493,8 @@ void vk_renderer_draw(PicaState* s, int indexed)
     const long n = pica_vertex_draw(s, indexed, triangles, 1 << 18);
     if (n <= 0) { vk_skips[n < 0 ? 1 : 2]++; return; }
     static char frag[1 << 17];
+    if (getenv("HOS_RENDER_LOOSE") && strstr(getenv("HOS_RENDER_LOOSE"), "alpha"))
+        pica_fragment_no_alpha_test = 1;
     const long len = pica_fragment_glsl(s, frag, sizeof frag);
     if (len < 0)
         return;
@@ -501,6 +504,9 @@ void vk_renderer_draw(PicaState* s, int indexed)
                           make_buffer(&uniforms, sizeof(PicaFragmentUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) ||
                           make_buffer(&luts, 24 * 256 * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)))
         return;
+    if (!BITS(r[0x11E], 24, 1)) /* flipped (Azahar's trivial vertex shader: vtx_pos.y = -vtx_pos.y) */
+        for (long k = 0; k < n; k++)
+            triangles[k].position[1] = -triangles[k].position[1];
     memcpy(vertices.map, triangles, (size_t)n * sizeof(PicaVertex));
     pica_fragment_uniforms(s, uniforms.map);
     pica_fragment_luts(s, luts.map);

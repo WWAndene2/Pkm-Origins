@@ -47,6 +47,8 @@ static float half_to_float(uint32_t h, int mant, int exp)
 float pica_float16(uint32_t raw) { return half_to_float(raw & 0xFFFF, 10, 5); }
 float pica_float20(uint32_t raw) { return half_to_float(raw & 0xFFFFF, 12, 7); }
 
+int pica_fragment_no_alpha_test;
+
 static const uint32_t stage_reg[6] = {0x0C0, 0x0C8, 0x0D0, 0x0D8, 0x0F0, 0x0F8};
 
 static void rgba8(uint32_t c, float o[4])
@@ -425,7 +427,9 @@ long pica_fragment_glsl(const PicaState* s, char* out, size_t size)
             "    vec4 rounded_primary_color = byteround(primary_color);\n"
             "    vec4 primary_fragment_color = vec4(0.0), secondary_fragment_color = vec4(0.0);\n");
     const uint32_t alpha_test = r[0x104];
-    const uint32_t func = (alpha_test & 1) ? BITS(alpha_test, 4, 3) : 1; /* (off: always) */
+    uint32_t func = (alpha_test & 1) ? BITS(alpha_test, 4, 3) : 1; /* (off: always) */
+    if (pica_fragment_no_alpha_test) /* (a diagnostic: VulkanRenderer.c's $HOS_RENDER_LOOSE "alpha") */
+        func = 1;
     if (func == 0) {
         put(&o, "    discard;\n}\n");
         return o.full ? -1 : (long)o.used;
