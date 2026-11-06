@@ -480,7 +480,41 @@ Performance comes first in every design choice, the more so for the seamless co-
    the program's data (0x338D84...: 0x60, 0x30 and 0x10 bytes). Each item's own word at +0x38 is compared byte-swapped
    with the last (a sort key). Still to read: the rest of its loop, the draw record in full, and what fills the items.
 
-## 11. The renderer's architecture (step 4; owner's request, 5 November: a design to discuss, nothing built)
+   **The opening rendered and run through (6 November).** Our frames against 36 of Azahar's shots of the opening, in
+   time order (`tools/frame_compare.py`): 29 within 0.2-2.5 / 255 (most at 0.2, the pixels nearly alike); the others
+   Azahar's own artefacts (black hatching on outlines in its headless shots), a camera a few pixels apart, the timing of
+   a fading effect (y9, 17 / 255) and Latios's path a few frames off. What made it so, each seen on the frames:
+   - textures upside down (the PICA's t = 0 is a texture's last row in memory): faces, eyes, the title text, the trees;
+   - the geometry shader not run (406 draws: the light veil and streaks as Latios passes, the trails), now as Azahar's
+     three modes, setemit / emit and the output bank;
+   - a texture that is a render target read from memory (a full-screen pass every frame), now that target's image.
+   Not done yet in the renderer: fog (the volcano's haze, y9, is likely it), a render target's image written back to
+   memory (one read-back seen: a display transfer from VRAM to the linear heap, 128 x 128, frame 0), the speed (§11.3:
+   one submission per draw, vertex shaders on the CPU; the opening renders at a few frames a second here).
+   **The runtime's fixes the opening needed:**
+   - a freeze in about one run in ten (a game thread looping at 00190C28 on a circular list): the DSP's frames run back
+     to back when a draw of ours held the kernel lock, the second wrote the sources' statuses again with
+     current_buffer_id_dirty cleared, the game never saw a buffer retire and reused it while queued. A DSP frame is
+     now made only once the game's frame counter has moved (`src/hos/service/DspSource.c`): 17 runs, no hang, no
+     buffer appended twice. Found with `tools/hang_watch.sh` and a record of the statuses the game read;
+   - preemption at loop heads, the exclusive monitor cleared on a thread switch, a check that only the thread holding
+     the CPU runs (`src/hos/Thread.c`): the 3DS's behaviours, none of them the freeze's cause;
+   - `y2r:u` (the YUV to RGB converter: `src/hos/service/Y2r.c`), texture copies (`Gsp.c`).
+   **The translator's fixes** (`tools/arm2c.py`, `tools/translate_program.py`), all checked by the matching on 3,000
+   functions (3,721 with their callees, 0 mismatched) and on the functions concerned:
+   - calls made by hand: lr set (add lr, pc, #n / mov lr, pc) then a jump (add pc, b, bcc, bx, through a table of
+     offsets from pc); a jump to the return address is the return; a return past the caller unwinds to the frame it
+     returns to; `tools/asm_scan.py hand-calls` lists them (102 in ORAS's .code, all in the video decoder);
+   - **regions of hand-written code** translated as one body (`symbols/oras_asm_regions.tsv`: the video decoder,
+     0x1AE400-0x1BFA20, 707 entries): inside, every return and jump goes on through the dispatch, as a CPU does;
+   - addresses a literal pool holds inside a function are entries (157), and a thread whose return no frame took goes
+     on at that address (the thread exit at 00131FD8, reached from a function run on its own stack, 001C15C0).
+   **Where it stands:** the game runs past the opening; then (with the owner's save) Azahar shows the title movie, and
+   we show a white screen: the game decodes video frames (`y2r:u`, 480 conversions) but issues no draw at all. Azahar's
+   counts over the same span (`tools/call_counts_compare.py`) have no `y2r:u` request at all, and 2 WaitSynchronizationN
+   against our 799, no SleepThread against our 2,033: the game takes another path with us. That difference is next.
+
+## 11. The renderer's architecture (step 4; owner's request, 5 November. Built since, first form: src/platform/Pica*.c and VulkanRenderer.c, the opening rendered as Azahar's, §10; not yet fast)
 
 Goals (owner's): native rendering, no translation of the 3DS's GPU commands (§3, step 4); every PC and phone, Windows,
 Linux, Android on Adreno and above all Mali; every quality setting up with no stutter and no added latency. Built on
