@@ -7,7 +7,8 @@ Ours: src/platform/VulkanRenderer.c's $HOS_RENDER_DIR frames (frame_<n>_<address
 it lies, 256 x 512 for the top screen); only those of --address (the top screen's buffer). Azahar's: Pomegrade's
 headless shots (400 x 480: the top screen above the bottom one). Our frame is turned into the screen's view (the
 framebuffer holds the screen rotated: transposed, the screen's 240 rows from its 256, its 400 columns from 512),
-then each shot's closest frame of ours found (the timelines differ: ours runs at its own pace), and the two compared:
+then each shot's closest frame of ours found (on small images, then among its neighbours at full size: the timelines
+differ, ours runs at its own pace unless $HOS_TIME_SCALE keeps it at the game's), and the two compared:
 the mean absolute difference per channel (0-255) and the share of pixels differing by more than 8.
 
 The images are the owner's game's: they stay in the session's scratch space, never in the repository.
@@ -49,7 +50,13 @@ def main():
         ref = Image.open(shot).convert("RGB").crop((0, 0, 400, 240))
         ref_small = ref.resize((100, 60))
         best = min(small, key=lambda fs: difference(ref_small, fs[1])[0])
-        mine = screen_view(best[0])
+        # then the frames around it at full size: the closest one (a frame apart moves what sways)
+        at = ours.index(best[0])
+        around = ours[max(0, at - a.step - 2):at + a.step + 3]
+        scored = [(f, screen_view(f)) for f in around]
+        best_full = min(scored, key=lambda fm: difference(ref, fm[1])[0])
+        best = (best_full[0], None)
+        mine = best_full[1]
         mean, big, d = difference(ref, mine)
         rows.append((shot, best[0], mean, big, ref, mine, d))
         print("%s ~ %s: mean difference %.1f / 255, pixels off by more than 8: %.1f %%"
