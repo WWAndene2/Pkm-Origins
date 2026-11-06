@@ -75,6 +75,5 @@ Lessons that cost time, so they are not paid twice:
 
 ## Open with the owner
 
-- An `item` command was pushed by mistake to Pomegrade's branch `ccr-700c70f5-5dwhza` (commit `31f59fe0`, in
-  `tools/remake/prototype/oras_save.py`); the owner said Pomegrade is not to be worked on here. Proposed: move it to
-  Pkm-Origins and delete that branch. Waiting for the owner's answer: do nothing until then.
+- Nothing. (The `item` command pushed to Pomegrade by mistake, commit `31f59fe0` on its branch `ccr-700c70f5-5dwhza`, is
+  now `tools/oras_save_items.py` here; the owner asked to keep that Pomegrade branch: do not delete it.)
