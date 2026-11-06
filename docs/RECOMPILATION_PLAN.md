@@ -683,6 +683,16 @@ later, on matched code: widescreen, 60 fps (interpolation), better shadows and e
 - Frames: our frame against Azahar's on the same scene (the owner's save, the same scripted inputs, HOS_INPUT), image
   by image at 1x: a difference beyond Azahar's own approximations is a defect. A headless mode renders frames to PNG
   for this, in the container, with no phone.
+- How a comparison is read (learnt on the opening, 6 November: a whole-screen score called it close while every
+  texture was upside down, faces and title text wrong):
+  1. Render with the game's clock slowed (`HOS_TIME_SCALE=0.12`) so no frame is dropped, then
+     `tools/frame_compare.py` with the shots in time order: read the worst 32 x 32 tile as well as the mean, and look at
+     the labelled sheet and the `--zoom-out` crops. Azahar's headless shots have artefacts of their own (black hatching
+     on outlines): the labels say which column is Azahar's.
+  2. Look at our frames by eye, zoomed on the characters, faces and text (`tools/frame_sheet.py --crop --zoom`): a
+     scene is not done until it holds up close.
+  3. A wrong object: its textures as decoded (`$HOS_TEXTURE_DIR`) tell a decoding fault from a placing one.
+  4. A run that stops drawing: `tools/hang_watch.sh` catches it and takes the game's threads and the host stacks.
 
 ### 11.7 Milestones
 
