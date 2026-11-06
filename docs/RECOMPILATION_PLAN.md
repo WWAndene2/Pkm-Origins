@@ -511,9 +511,10 @@ Performance comes first in every design choice, the more so for the seamless co-
    - addresses a literal pool holds inside a function are entries (157), and a thread whose return no frame took goes
      on at that address (the thread exit at 00131FD8, reached from a function run on its own stack, 001C15C0).
    **Where it stands:** the game runs past the opening; then (with the owner's save) Azahar shows the title movie, and
-   we show a white screen: the game decodes video frames (`y2r:u`, 480 conversions) but issues no draw at all. Azahar's
-   counts over the same span (`tools/call_counts_compare.py`) have no `y2r:u` request at all, and 2 WaitSynchronizationN
-   against our 799, no SleepThread against our 2,033: the game takes another path with us. That difference is next.
+   we show a white screen: the game decodes video frames (`y2r:u`, 480 conversions) but issues no draw at all. (A
+   first comparison of the calls with Azahar's, `tools/call_counts_compare.py`, was not over the same span: Azahar's
+   counting run stopped at frame 2,564, before the movie, about frame 3,000; it proves nothing about `y2r:u`. To redo
+   with Azahar's run reaching the movie.)
 
 ## 11. The renderer's architecture (step 4; owner's request, 5 November. Built since, first form: src/platform/Pica*.c and VulkanRenderer.c, the opening rendered as Azahar's, §10; not yet fast)
 

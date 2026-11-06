@@ -17,8 +17,9 @@ what is done, §11 for the renderer). This file says where things stand and what
   2.5 / 255). It is the first, correct-but-slow form: one submission per draw, vertex shaders on the CPU.
 - **The blocker now:** after the opening, with the owner's save, Azahar shows the title movie; we show a white top
   screen and a black bottom one. The game decodes the movie's frames through `y2r:u` (480 conversions in 300 s) and
-  issues no draw at all. Azahar's run makes **no** `y2r:u` request over the same span, 2 WaitSynchronizationN where we
-  make 799, and no SleepThread where we make 2,033. So the game takes another path with us. Find why.
+  issues no draw at all. A first comparison of the calls with Azahar's was wrong: Azahar's counting run (slowed by the
+  counting) stopped at frame 2,564, before the movie (about frame 3,000). To redo with Azahar reaching the movie
+  (`tools/azahar_trace_run.sh` with "wait 3600": about 35 minutes; ask the owner, runs over 15 minutes).
 
 ## How to work (the loop)
 
@@ -59,8 +60,8 @@ Lessons that cost time, so they are not paid twice:
 
 ## Next steps, in order
 
-1. **The path after the opening** (the blocker above). Start from `call_counts_compare.py`'s differences: what
-   decides that the game decodes through `y2r:u` with us and not in Azahar? Candidates to check, none checked yet:
+1. **The path after the opening** (the blocker above). First Azahar's counts over the movie, then
+   `call_counts_compare.py`'s differences. Candidates to check, none checked yet:
    what `cfg`, `apt` or `fs` answer about the system (a model or a setting the movie player reads), the timing of
    `y2r:u`'s transfer-end event, an FS request that fails differently (Azahar makes `CreateDirectory`,
    `CreateExtSaveData` that we do not). A record of each thread's calls on both sides
