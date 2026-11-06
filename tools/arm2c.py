@@ -25,6 +25,7 @@ import function_list  # noqa: E402
 
 REG = {"r0": 0, "r1": 1, "r2": 2, "r3": 3, "r4": 4, "r5": 5, "r6": 6, "r7": 7, "r8": 8, "sb": 9, "r9": 9, "sl": 10,
        "r10": 10, "fp": 11, "r11": 11, "ip": 12, "r12": 12, "sp": 13, "lr": 14, "pc": 15}
+CONDITIONS = ("eq", "ne", "cs", "hs", "cc", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le")
 COND = {1: "c->z", 2: "!c->z", 3: "c->c", 4: "!c->c", 5: "c->n", 6: "!c->n", 7: "c->v", 8: "!c->v",
         9: "(c->c && !c->z)", 10: "(!c->c || c->z)", 11: "(c->n == c->v)", 12: "(c->n != c->v)",
         13: "(!c->z && c->n == c->v)", 14: "(c->z || c->n != c->v)"}
@@ -722,9 +723,24 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             if p.mnemonic == "mov" and dst_lr and len(ops_) == 2 and ops_[1].type == ARM_OP_REG \
                     and p.reg_name(ops_[1].reg) == "pc":
                 return pc_of(p.address)
+            conditional_b = len(p.mnemonic) == 3 and p.mnemonic[0] == "b" and p.mnemonic[1:] in CONDITIONS
+            if conditional_b:  # (a branch that may not be taken leaves lr as it was: 001BC944's bne, then add pc)
+                continue
             if p.mnemonic.startswith(("b", "pop", "ldm")) or (dst_lr and not p.mnemonic.startswith(("st", "push", "cmp", "tst"))):
                 return None
         return None
+
+    def go_on_at(back):
+        """the C that goes on at back after a call made by hand: a label of this function, or an entry of its own"""
+        if start <= back < end_code:
+            targets.add(back)
+            return "goto L%X;" % back
+        if entries is None:
+            raise Unsupported("call by a jump returning outside the function")
+        if not is_start(back, thumb):
+            entries.add(back)
+        callees.add(back)
+        return "%s(c, ret); return;" % fname(back, module)
 
     def jump(expr):
         """a computed jump (add pc, ... / mov pc, rN / ldr pc, ...): to any instruction of this function by a switch
@@ -734,16 +750,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             raise Unsupported("computed jump in Thumb")
         back = preset_return(k_)
         if back is not None:
-            if start <= back < end_code:
-                targets.add(back)
-                after = "goto L%X;" % back
-            elif entries is not None:  # (inside another function: its own entry, as a branch there is)
-                if not is_start(back, thumb):
-                    entries.add(back)
-                callees.add(back)
-                after = "%s(c, ret); return;" % fname(back, module)
-            else:
-                raise Unsupported("call by a computed jump returning outside the function")
+            after = go_on_at(back)
             return "{ uint32_t t = %s; c->r[14] = %s; call_indirect(c, t, %s); if (c->fault) return; %s }" % (
                 expr, ADDR(back), ADDR(back), after)
         computed.append(True)
@@ -838,11 +845,19 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                     if not is_start(t, thumb):
                         entries.add(t)
                     callees.add(t)
+                    back = None if thumb else preset_return(k_)
+                    if back is not None:  # add lr, pc, #n just before: a call by hand (001BC940-944), going on at lr
+                        line.append("c->r[14] = %s; %s(c, %s); if (c->fault) return; %s" % (
+                            ADDR(back), fname(t, module), ADDR(back), go_on_at(back)))
+                        line_done = True
+                    else:
+                        line_done = False
                     # (a jump, not a call: lr is whatever it holds, often the return address of the last call made, as
                     # when a function jumps to an epilogue it shares; the return address is checked where the code
                     # actually returns, at its bx lr or pop {pc})
-                    line.append("%s(c, ret); return;" % fname(t, module))
-                    returned = i.cc in (0, 15)
+                    if not line_done:
+                        line.append("%s(c, ret); return;" % fname(t, module))
+                        returned = i.cc in (0, 15)
                 else:
                     raise Unsupported("branch out of the function to no function start")
             elif base_m in MULTI and not re.match(r"[sd]\d+$", i.reg_name(ops[0].reg)) or base_m in ("push", "pop"):

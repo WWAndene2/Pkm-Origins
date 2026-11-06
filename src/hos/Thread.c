@@ -217,6 +217,8 @@ static void run(HosThread* t)
         fprintf(stderr, "hos: thread %u stopped: fault %d at %08X%s%s%s (lr %08X%s%s%s, sp %08X)\n", t->id, c->fault,
                 c->r[15], at[0] ? " (" : "", at, at[0] ? ")" : "", c->r[14], from[0] ? " " : "", from, "",
                 c->r[13]);
+        if (c->fault == 3) /* (the address it returned to, that no frame above was called from) */
+            fprintf(stderr, "hos: thread %u returned to %08X, which no caller above called from\n", t->id, c->unwind);
         if (c->fault != 100) /* (100: ExitThread, ExitProcess: a normal end) */
             fflush(stderr);
     }
