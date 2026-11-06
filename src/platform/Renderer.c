@@ -131,6 +131,10 @@ static void on_draw(PicaState* s, int indexed, void* user)
         for (int i = 0; i < 3; i++)
             count("combiner source %u", src >> (4 * i) & 0xF);
     }
+    static const char* tex_type[8] = {"2D", "cube", "shadow 2D", "projection 2D", "shadow cube", "disabled", "6", "7"};
+    if (units & 1)
+        count("texture 0 type %s", tex_type[r[0x083] >> 28 & 7]);
+    count("texture lod levels unit 0: max %u", r[0x084] >> 16 & 15);
     count("fragment lighting %s", (r[0x08F] & 1) ? "on" : "off");
     count("fog mode %u", r[0x0E0] & 7);
     count("alpha test %s", (r[0x104] & 1) ? "on" : "off");
