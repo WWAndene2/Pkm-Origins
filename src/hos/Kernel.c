@@ -41,12 +41,22 @@ static int resource_kind(HosKind k)
 }
 static uint16_t generation[4096];
 
+/* the mutexes alive, for the release of those a thread holds when it ends */
+enum { MUTEXES = 1024 };
+static HosObject* mutexes[MUTEXES];
+
 HosObject* hos_object_new(HosKind kind)
 {
     HosObject* o = calloc(1, sizeof *o);
     o->kind = kind;
     o->refs = 1;
     hos_object_count[resource_kind(kind)]++;
+    if (kind == HOS_MUTEX)
+        for (int k = 0; k < MUTEXES; k++)
+            if (!mutexes[k]) {
+                mutexes[k] = o;
+                break;
+            }
     return o;
 }
 
@@ -54,6 +64,10 @@ void hos_object_release(HosObject* o)
 {
     if (o && --o->refs == 0 && o->kind != HOS_THREAD) { /* (a thread's object lives as long as its thread) */
         hos_object_count[resource_kind(o->kind)]--;
+        if (o->kind == HOS_MUTEX)
+            for (int k = 0; k < MUTEXES; k++)
+                if (mutexes[k] == o)
+                    mutexes[k] = NULL;
         free(o);
     }
 }
@@ -426,4 +440,17 @@ void hos_svc(Cpu* c, uint32_t n)
     if (!c->fault)
         hos_preempt_check(t);
     pthread_mutex_unlock(&hos_lock);
+}
+
+/* a thread ending releases the mutexes it holds, their waiters woken (Azahar's ReleaseThreadMutexes). ORAS's title
+   movie: its decoding thread ends holding one, and the thread ending after it waited on it for ever, with the main
+   thread waiting for that one (6 November: the white screen after the opening). */
+void hos_release_thread_mutexes(HosThread* t)
+{
+    for (int k = 0; k < MUTEXES; k++)
+        if (mutexes[k] && mutexes[k]->owner == t && mutexes[k]->lock_count) {
+            mutexes[k]->lock_count = 0;
+            mutexes[k]->owner = NULL;
+            hos_object_wake(mutexes[k]);
+        }
 }

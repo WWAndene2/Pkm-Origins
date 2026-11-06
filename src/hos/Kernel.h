@@ -116,6 +116,7 @@ HosResult hos_wait(HosThread* t, HosObject** objects, int count, int wait_all, i
 int hos_object_ready_for(HosObject* o, HosThread* t);
 void hos_object_acquire(HosObject* o, HosThread* t);
 void hos_object_wake(HosObject* o); /* o's state changed: wake the waiters it now satisfies */
+void hos_release_thread_mutexes(HosThread* t); /* a thread ending: the mutexes it holds released */
 void hos_timers_fire(int64_t now);
 int64_t hos_next_deadline(void);
 void hos_timeouts_fire(int64_t now);

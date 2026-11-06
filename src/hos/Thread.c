@@ -308,6 +308,7 @@ void hos_thread_start_main(HosThread* t)
 void hos_thread_exit(HosThread* t)
 {
     t->state = HOS_DEAD;
+    hos_release_thread_mutexes(t);
     t->object->signaled = 1; /* a thread's object is signaled once it has ended */
     hos_object_wake(t->object);
     if (hos_current == t)
