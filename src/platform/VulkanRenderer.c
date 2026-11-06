@@ -271,6 +271,7 @@ static struct { uint32_t address, width, height, format, stamp; uint64_t hash; I
 static int texture_next;
 static Buffer staging;
 unsigned long long vk_texture_reloads, vk_texture_in_target;
+static int drawing_target = -1; /* the target of the draw being made */
 
 static uint64_t hash_bytes(const uint8_t* p, size_t n)
 {
@@ -313,10 +314,19 @@ static VkImageView texture_view(PicaState* s, uint32_t address, uint32_t width, 
     const uint8_t* data = bytes && s->memory ? (const uint8_t*)s->memory(address, (uint32_t)bytes, s->user) : NULL;
     if (!data || !width || !height || width > 1024 || height > 1024)
         return VK_NULL_HANDLE;
+    /* a texture that is a render target (the game draws an image, then reads it: the opening's full-screen pass over a
+       256 x 512 RGBA8 target) is that target's image: what we drew lives there, not in memory (nothing is written
+       back). Its rows run as the textures' do (both opposite to memory: textures turned over at upload, targets drawn
+       with the flip the display transfer undoes). Not the draw's own target (a feedback loop); other cases (another
+       format, a part of a target) still read memory, counted. */
     for (int k = 0; k < TARGETS; k++)
         if (targets[k].used && address >= targets[k].address &&
-            address < targets[k].address + targets[k].width * targets[k].height * 4)
-            vk_texture_in_target++; /* (counted: drawn-into textures are read from memory as the GSP left it) */
+            address < targets[k].address + targets[k].width * targets[k].height * 4) {
+            if (address == targets[k].address && width == targets[k].width && height == targets[k].height &&
+                format == 0 && k != drawing_target)
+                return targets[k].color.view;
+            vk_texture_in_target++;
+        }
     for (int k = 0; k < TEXTURES; k++)
         if (textures[k].used && textures[k].address == address && textures[k].width == width &&
             textures[k].height == height && textures[k].format == format) {
@@ -537,6 +547,7 @@ void vk_renderer_draw(PicaState* s, int indexed)
     const uint32_t width = BITS(r[0x11E], 0, 11), height = BITS(r[0x11E], 12, 10) + 1;
     const uint32_t color_address = BITS(r[0x11D], 0, 28) * 8;
     const int t = target_for(color_address, width, height);
+    drawing_target = t;
     if (t < 0) { vk_skips[0]++; return; }
     targets[t].depth_address = BITS(r[0x11C], 0, 28) * 8;
     const long n = pica_vertex_draw(s, indexed, triangles, 1 << 18);
