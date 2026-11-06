@@ -15,6 +15,7 @@
 #include <string.h>
 #include <fenv.h>
 #include <time.h>
+#include <signal.h>
 
 volatile int hos_preempt_pending; /* a thread outranking the running one made ready from outside its system calls */
 
@@ -331,18 +332,24 @@ static void dump_threads(void)
     }
 }
 
+/* SIGUSR1: the threads dumped at the clock's next tick (within 0.1 s; tools/hang_watch.sh sends it on a hang) */
+static volatile sig_atomic_t dump_requested;
+static void on_dump_signal(int s) { (void)s; dump_requested = 1; }
+
 /* the clock thread: wakes the waits whose timeout passed and fires the timers due, then sleeps to the next one */
 static void* clock_main(void* p)
 {
     (void)p;
     pthread_mutex_lock(&hos_lock);
+    signal(SIGUSR1, on_dump_signal);
     const char* d = getenv("HOS_DUMP_AFTER");
     int64_t dump_at = d ? hos_now_ns() + (int64_t)(atof(d) * 1e9) : 0;
     for (;;) {
         int64_t now = hos_now_ns();
-        if (dump_at && now >= dump_at) {
+        if ((dump_at && now >= dump_at) || dump_requested) {
             dump_threads();
             dump_at = 0;
+            dump_requested = 0;
         }
         hos_timeouts_fire(now);
         hos_timers_fire(now);
