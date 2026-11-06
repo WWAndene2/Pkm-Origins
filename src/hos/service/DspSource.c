@@ -145,7 +145,7 @@ static void frame(int s)
     }
 }
 
-unsigned long long hos_dsp_frames_waited; /* frames put off: the game had not written a new frame */
+unsigned long long hos_dsp_frames_waited; /* attempts put off (a tick or a 0.25 ms retry, Dsp.c): the game had not written a new frame */
 
 int hos_dsp_sources_tick(void)
 {

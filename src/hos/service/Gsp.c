@@ -229,7 +229,7 @@ void hos_gsp_report(void)
     hos_gpu_trace_write();
     renderer_report();
     extern unsigned long long hos_dsp_frames_waited;
-    fprintf(stderr, "hos: %llu GPU command lists, %llu VBlanks; audio frames put off (the game behind) %llu\n",
+    fprintf(stderr, "hos: %llu GPU command lists, %llu VBlanks; audio frame attempts put off (the game not ready) %llu\n",
             (unsigned long long)command_lists, (unsigned long long)frames, hos_dsp_frames_waited);
 }
 
