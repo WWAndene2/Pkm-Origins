@@ -6,7 +6,9 @@
  * RasterizerAccelerated::AddTriangle: a 64-entry vertex cache for indexed draws (same results), each triangle's
  * second and third quaternions negated when opposite to the first's.
  *
- * Not yet: the geometry shader (none on the title), vertex retention (Azahar has none either). */
+ * The geometry shader (0x229 = 2): the vertex shader's outputs fed to it in Azahar's three modes (GeometryPipeline:
+ * point, variable primitive, fixed primitive), its emit's triangles assembled with the winding it sets. Its unit keeps
+ * its registers from one invocation to the next, as Azahar's. Not yet: vertex retention (Azahar has none either). */
 #ifndef PICA_VERTEX_H
 #define PICA_VERTEX_H
 

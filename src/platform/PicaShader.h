@@ -7,7 +7,9 @@
  * non-NaN inputs (0 x infinity) is 0, mad is a product then a sum (no fused multiply-add), dot products sum from 0 in
  * order, max / min take the second operand unless the first compares greater / less (NaN semantics), stacks of 8 ifs,
  * 4 calls, 4 loops with Azahar's pop order and its four-call hardware bug, a float uniform indexed by an address
- * register past 95 reads as ones. Not run: emit / setemit (geometry shader output), lit and dst (Azahar has none).
+ * register past 95 reads as ones. The geometry shader's setemit records the vertex slot, primitive and winding flags,
+ * emit hands the outputs to the unit's emit callback and switches the output bank (Azahar's GeometryEmitter: the writes
+ * after an emit go to the other bank, which keeps what was written there before). Not run: lit and dst (Azahar has none).
  */
 #ifndef PICA_SHADER_H
 #define PICA_SHADER_H
@@ -24,13 +26,18 @@ typedef struct {
     uint8_t b[16];                        /* boolean uniforms b0-b15 */
 } PicaShaderSetup;
 
-typedef struct {
+typedef struct PicaShaderUnitTag {
     float input[16][4];
     float temp[16][4];
     float output[16][4];
     int32_t address[3];                   /* a0.x, a0.y, aL */
     uint8_t cond[2];                      /* the conditional codes */
     uint32_t steps;                       /* instructions run (a bound for broken programs) */
+    /* the geometry shader's: the other output bank, setemit's state, the callback emit calls (none: emit does nothing) */
+    float other_bank[16][4];
+    uint8_t emit_vertex, emit_primitive, emit_winding;
+    void (*emit)(void* context, struct PicaShaderUnitTag* unit);
+    void* emit_context;
 } PicaShaderUnit;
 
 /* Runs the program from entry until end (or the last instruction, or max_steps instructions); 0 when it ended, -1 when

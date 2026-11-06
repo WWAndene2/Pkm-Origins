@@ -222,7 +222,21 @@ int pica_shader_run(const PicaShaderSetup* s, PicaShaderUnit* u, uint32_t entry,
                 if (condition(u, w))
                     is_break = 1;
                 break;
-            default: /* nop; emit / setemit belong to the geometry shader, not run here */
+            case OP_SETEMIT:
+                u->emit_vertex = (uint8_t)BITS(w, 24, 2);
+                u->emit_primitive = (uint8_t)BITS(w, 23, 1);
+                u->emit_winding = (uint8_t)BITS(w, 22, 1);
+                break;
+            case OP_EMIT:
+                if (u->emit) {
+                    u->emit(u->emit_context, u);
+                    float keep[16][4];
+                    memcpy(keep, u->output, sizeof keep);
+                    memcpy(u->output, u->other_bank, sizeof keep);
+                    memcpy(u->other_bank, keep, sizeof keep);
+                }
+                break;
+            default: /* nop */
                 break;
             }
         }
