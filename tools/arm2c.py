@@ -621,8 +621,12 @@ def vfp(i, word, relocated):
 
 
 def translate(code, base, start, end, name, starts=frozenset(), callees=None, relocated=frozenset(), thumb=False,
-              thumb_starts=frozenset(), entries=None, module=None):
-    """the C of the function at start (to end at most), or Unsupported. starts: the ARM functions of the list, for calls
+              thumb_starts=frozenset(), entries=None, module=None, region=False):
+    """the C of the function at start (to end at most), or Unsupported. region: start-end is a region of hand-written
+    code translated as one body, <name>_body(c, ret, entry), entered at any of its addresses (region_wrapper), where
+    every return or jump to an address of the region goes on there through the dispatch, as a CPU would (ORAS's
+    video decoder: routines sharing stack frames, returning past their callers, called with lr set by hand).
+    starts: the ARM functions of the list, for calls
     and tail calls (b to a start), thumb_starts the Thumb ones; thumb: the function itself is Thumb (Thumb-1 and the
     bl / blx pair, as ARMv6K has it); callees, when given, receives the functions it calls (they must be translated
     too); entries, when given, receives the targets of branches into the middle of other functions, taken as tail
@@ -1176,7 +1180,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                     body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, (
                         "if (%s) { %s }" % (COND[i.cc], stmt)) if i.cc not in (0, 15) else stmt)))
                     returned = i.cc in (0, 15)
-                    if returned and max(targets, default=0) <= i.address:
+                    if returned and max(targets, default=0) <= i.address and not region:
                         break
                     returned = False
                     continue
@@ -1249,7 +1253,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         if i.cc not in (0, 15):
             stmt = "if (%s) { %s }" % (COND[i.cc], stmt)
         body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, stmt)))
-        if returned and max(targets, default=0) <= i.address:
+        if returned and max(targets, default=0) <= i.address and not region:
             break
         returned = False
     if not insns:  # (nothing decoded: every word data, a module's relocated table where a function was listed)
@@ -1278,19 +1282,23 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
     # the function's body, and the function: a wrapper counting how deep the calls go (tail calls and calls through
     # pointers can loop without end on a test's random values: past 2,000 the trial stops on fault 2, as a long loop
     # does, instead of overflowing the C's stack)
-    out = ["static void %s_body(Cpu* c, uint32_t ret)\n{\n    (void)ret;" % name]
+    out = ["static void %s_body(Cpu* c, uint32_t ret)\n{\n    (void)ret;" % name] if not region else \
+        ["void %s_body(Cpu* c, uint32_t ret, uint32_t entry)\n{" % name]
     dispatch = None
     # a return to an address its caller did not call from: in a function that calls its own routines by hand, an
     # address of this function goes on there (the dispatch); else the frames above are unwound to the one it is
     # the return address of (the wrapper below), fault 3 if none
-    if hand_calls:
+    if hand_calls or region:
         computed.append(True)
     def elsewhere(v):
-        inner = ("if (%s - %s < 0x%Xu) { jt = %s; goto DISPATCH; } " % (v, ADDR(start), end_code - start, v)) if hand_calls else ""
+        inner = ("if (%s - %s < 0x%Xu) { jt = %s; goto DISPATCH; } " % (v, ADDR(start), end_code - start, v)) \
+            if hand_calls or region else ""
         return "%sc->unwind = %s; c->fault = 3; return;" % (inner, v)
     body = [(a, re.sub(r"RETURN_ELSEWHERE\(([^)]*\)?[^)]*)\)", lambda m_: elsewhere(m_.group(1)), x)) for a, x in body]
     if computed:
         out.append("    uint32_t jt;")
+        if region:  # (entered at the address it is called at)
+            out.append("    jt = entry; goto DISPATCH;")
         done = sorted({a for a, _ in body if a < end_code})
         cases = " ".join("case 0x%Xu: goto L%X;" % (x, x) for x in done)
         # (a target that is the return address is the return itself: lr copied to another register and jumped to,
@@ -1318,10 +1326,21 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
     # a return past this frame (fault 3 with c->unwind set: code that returns to its caller's caller, as ORAS's video
     # decoder at 001BF58C pops the return address its caller pushed): the frame whose return address it is takes it as
     # its own return, and its caller goes on; with none, the fault stays (a wrong return address, as before)
+    if region:  # (the body alone: each address the region is entered at has its wrapper, region_wrapper)
+        return "\n".join(out), 4 * len(body)
     out.append("void %s(Cpu* c, uint32_t ret)\n{\n    HOS_ENTER(c);\n    HOS_FN_IN(%s);\n    %s_body(c, ret);\n"
                "    if (c->fault == 3 && c->unwind == ret) { c->fault = 0; c->unwind = 0; }\n"
                "    HOS_FN_OUT();\n    HOS_LEAVE(c);\n}\n" % (name, ADDR(start), name))
     return "\n".join(out), 4 * len(body)
+
+
+def region_wrapper(body_name, at, module=None):
+    """the function at an address inside a region (translate's region): the region's body entered there"""
+    name = fname(at, module)
+    return ("void %s_body(Cpu* c, uint32_t ret, uint32_t entry);\n"
+            "void %s(Cpu* c, uint32_t ret)\n{\n    HOS_ENTER(c);\n    HOS_FN_IN(0x%Xu);\n    %s_body(c, ret, 0x%Xu);\n"
+            "    if (c->fault == 3 && c->unwind == ret) { c->fault = 0; c->unwind = 0; }\n"
+            "    HOS_FN_OUT();\n    HOS_LEAVE(c);\n}\n" % (body_name, name, at, body_name, at))
 
 
 def main():

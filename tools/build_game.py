@@ -58,7 +58,7 @@ def main():
     size = {int(r[0], 16): int(r[4]) for r in rows}
     relocated = arm2c.static_relocations(a.cro) if a.cro else frozenset()
     funcs, deps, why, reasons, entry_thumb = translate_program.translate_program(
-        code, a.base, starts, size, thumb, relocated, None, a.jobs)
+        code, a.base, starts, size, thumb, relocated, None, a.jobs, translate_program.load_regions(a.functions))
     thumb |= entry_thumb
     # the stubs: the listed functions not translated, and any callee not translated
     wanted = set(starts) | {t for d in deps.values() for t in d}

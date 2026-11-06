@@ -237,7 +237,8 @@ def main():
         uthumb = {int(r[0], 16) for r in urows if r[3] == "thumb"}  # (arm2c translates both)
         usize = {int(r[0], 16): int(r[4]) for r in urows}
         uf, ud, uw, ur, ue = translate_program.translate_program(
-            data, 0 if module else a.base, ustarts, usize, uthumb, relocated, module, a.jobs)
+            data, 0 if module else a.base, ustarts, usize, uthumb, relocated, module, a.jobs,
+            () if module else translate_program.load_regions(a.functions))
         for k, v in uf.items():
             funcs[vb + k], name_of[vb + k] = v, arm2c.fname(k, module)
         for k, v in ud.items():
@@ -285,7 +286,7 @@ def main():
             k = todo.pop()
             if k not in keep:
                 keep.add(k)
-                todo.extend(deps[k])
+                todo.extend(deps.get(k, ()))  # (a callee not translated has none: a stub)
         funcs = {k: v for k, v in funcs.items() if k in keep}
     retest = None
     replay = [int(x, 16) for x in open(a.replay).read().split()] if a.replay else None
