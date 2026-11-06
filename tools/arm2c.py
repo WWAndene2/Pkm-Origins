@@ -726,7 +726,11 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             conditional_b = len(p.mnemonic) == 3 and p.mnemonic[0] == "b" and p.mnemonic[1:] in CONDITIONS
             if conditional_b:  # (a branch that may not be taken leaves lr as it was: 001BC944's bne, then add pc)
                 continue
-            if p.mnemonic.startswith(("b", "pop", "ldm")) or (dst_lr and not p.mnemonic.startswith(("st", "push", "cmp", "tst"))):
+            if p.mnemonic.startswith(("pop", "ldm")):  # (a load of registers: in the way only if it loads lr or pc)
+                if any(o.type == ARM_OP_REG and p.reg_name(o.reg) in ("lr", "pc") for o in ops_[(1 if p.mnemonic.startswith("ldm") else 0):]):
+                    return None
+                continue
+            if p.mnemonic.startswith("b") or (dst_lr and not p.mnemonic.startswith(("st", "push", "cmp", "tst"))):
                 return None
         return None
 
@@ -750,6 +754,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             raise Unsupported("computed jump in Thumb")
         back = preset_return(k_)
         if back is not None:
+            hand_calls.append(back)
             after = go_on_at(back)
             return "{ uint32_t t = %s; c->r[14] = %s; call_indirect(c, t, %s); if (c->fault) return; %s }" % (
                 expr, ADDR(back), ADDR(back), after)
@@ -761,6 +766,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
         # Omega Ruby's C several times larger, 5 November)
         return "{ jt = %s; goto DISPATCH; }" % expr
     body, targets, returned = [], set(), False
+    hand_calls = []  # the return addresses of the calls made by hand (preset_return) in this function
     unsupported = []  # the instructions with no C (a stop each)
     for k_, i in enumerate(insns):
         prev = insns[k_ - 1] if k_ else None
@@ -804,7 +810,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             elif base_m == "bx" and i.reg_name(ops[0].reg) == "lr":
                 # the C returns to its caller: right only when lr is the address this function got (a shared epilogue pops
                 # lr from the stack: X's 00205E20); otherwise fault 3, never a silent other path
-                line.append("if (c->r[14] != ret) { c->unwind = c->r[14]; c->fault = 3; return; } return;")
+                line.append("if (c->r[14] != ret) { RETURN_ELSEWHERE(c->r[14]) } return;")
                 returned = i.cc in (0, 15)
             elif (base_m == "bx" and ops[0].type == ARM_OP_REG and not thumb and prev is not None
                   and prev.mnemonic.startswith("ldr") and prev.operands[0].type == ARM_OP_REG
@@ -816,6 +822,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             elif base_m == "bx" and ops[0].type == ARM_OP_REG and not thumb and preset_return(k_) is not None:
                 # add lr, pc, #n just before: a call by hand through a register (001BC884-888: add lr, pc, #0; bx r4)
                 back = preset_return(k_)
+                hand_calls.append(back)
                 # (the register set from pc just before, conditionally or not: addhs r4, pc, #0x14c / addlo r4, pc,
                 # #0x84; each address an entry, which call_indirect finds, when inside another function)
                 for j in range(k_ - 1, max(-1, k_ - 9), -1):
@@ -854,6 +861,9 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 t = ops[0].imm
                 if start <= t < end_code:
                     targets.add(t)
+                    if not thumb and preset_return(k_) is not None:  # a call by hand to a routine of this function:
+                        hand_calls.append(preset_return(k_))      # its return (to lr) comes back by the dispatch below
+                        targets.add(preset_return(k_))
                     line.append("goto L%X;" % t)
                 elif is_start(t, thumb) or entries is not None:  # a tail call: the callee returns for this function
                     # (a target that is no start is inside another function: code the compiler shares between functions,
@@ -863,6 +873,8 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                         entries.add(t)
                     callees.add(t)
                     back = None if thumb else preset_return(k_)
+                    if back is not None:
+                        hand_calls.append(back)
                     if back is not None:  # add lr, pc, #n just before: a call by hand (001BC940-944), going on at lr
                         line.append("c->r[14] = %s; %s(c, %s); if (c->fault) return; %s" % (
                             ADDR(back), fname(t, module), ADDR(back), go_on_at(back)))
@@ -909,7 +921,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                 if load and 15 in regs:
                     # the popped pc must be the return address this function got: a test whose stores overwrote it has no
                     # meaning (the original would jump elsewhere); fault 3 makes the trial invalid
-                    line.append(" if (c->r[15] != ret) { c->unwind = c->r[15]; c->fault = 3; return; } return;")
+                    line.append(" if (c->r[15] != ret) { RETURN_ELSEWHERE(c->r[15]) } return;")
                     returned = i.cc in (0, 15)
             elif thumb and base_m in ("lsl", "lsr", "asr", "ror") and len(ops) == 2 and ops[1].type == ARM_OP_REG:
                 # Thumb's lsls rd, rs: rd shifted by rs
@@ -964,7 +976,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
             elif base_m in ("mov", "mvn") and rd() == 15:
                 if base_m == "mov" and ops[1].type == ARM_OP_REG and i.reg_name(ops[1].reg) == "lr" and not ops[1].shift.type \
                         and not i.update_flags:  # mov pc, lr: a return (ARMv4's)
-                    line.append("if (c->r[14] != ret) { c->unwind = c->r[14]; c->fault = 3; return; } return;")
+                    line.append("if (c->r[14] != ret) { RETURN_ELSEWHERE(c->r[14]) } return;")
                 elif i.update_flags:
                     raise Unsupported("write to pc with flags (an exception return)")
                 else:
@@ -1097,7 +1109,7 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
                     if base_m == "ldr" and basereg == "sp" and post and ops[2].type == ARM_OP_IMM and i.cc in (0, 15):
                         # ldr pc, [sp], #4: pop {pc}, a return
                         line.append("{ uint32_t v = ld32(c, c->r[13]); if (c->fault) return; c->r[13] += 0x%Xu;"
-                                    " if (v != ret) { c->unwind = v; c->fault = 3; return; } } return;" % (ops[2].imm & 0xFFFFFFFF))
+                                    " if (v != ret) { RETURN_ELSEWHERE(v) } } return;" % (ops[2].imm & 0xFFFFFFFF))
                         body.append((i.address, "    /* %08X %s %s */ %s" % (i.address, m, i.op_str, "".join(line))))
                         returned = True
                         if max(targets, default=0) <= i.address:
@@ -1232,6 +1244,15 @@ def translate(code, base, start, end, name, starts=frozenset(), callees=None, re
     # does, instead of overflowing the C's stack)
     out = ["static void %s_body(Cpu* c, uint32_t ret)\n{\n    (void)ret;" % name]
     dispatch = None
+    # a return to an address its caller did not call from: in a function that calls its own routines by hand, an
+    # address of this function goes on there (the dispatch); else the frames above are unwound to the one it is
+    # the return address of (the wrapper below), fault 3 if none
+    if hand_calls:
+        computed.append(True)
+    def elsewhere(v):
+        inner = ("if (%s - %s < 0x%Xu) { jt = %s; goto DISPATCH; } " % (v, ADDR(start), end_code - start, v)) if hand_calls else ""
+        return "%sc->unwind = %s; c->fault = 3; return;" % (inner, v)
+    body = [(a, re.sub(r"RETURN_ELSEWHERE\(([^)]*\)?[^)]*)\)", lambda m_: elsewhere(m_.group(1)), x)) for a, x in body]
     if computed:
         out.append("    uint32_t jt;")
         done = sorted({a for a, _ in body if a < end_code})
