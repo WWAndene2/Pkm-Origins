@@ -15,11 +15,10 @@ what is done, §11 for the renderer). This file says where things stand and what
   that is known (the DSP one is fixed: `DspSource.c`).
 - **Renderer (`src/platform/`):** Vulkan, headless, frames to PPM. The opening matches Azahar's shots (29 of 36 within
   2.5 / 255). It is the first, correct-but-slow form: one submission per draw, vertex shaders on the CPU.
-- **The blocker now:** after the opening, with the owner's save, Azahar shows the title movie; we show a white top
-  screen and a black bottom one. The game decodes the movie's frames through `y2r:u` (480 conversions in 300 s) and
-  issues no draw at all. A first comparison of the calls with Azahar's was wrong: Azahar's counting run (slowed by the
-  counting) stopped at frame 2,564, before the movie (about frame 3,000). To redo with Azahar reaching the movie
-  (`tools/azahar_trace_run.sh` with "wait 3600": about 35 minutes; ask the owner, runs over 15 minutes).
+- **Where the game gets (6 November, end of session):** the opening, the title movie and the title screen
+  ("POKÉMON RUBIS OMÉGA / APPUYEZ SUR START"), with the owner's save. The last two fixes: a thread ending releases the
+  mutexes it holds (the main thread waited for ever behind one), and the GPU's immediate mode (the movie is drawn
+  with it). Not yet compared frame by frame with Azahar past the opening.
 
 ## How to work (the loop)
 
@@ -60,12 +59,9 @@ Lessons that cost time, so they are not paid twice:
 
 ## Next steps, in order
 
-1. **The path after the opening** (the blocker above). First Azahar's counts over the movie, then
-   `call_counts_compare.py`'s differences. Candidates to check, none checked yet:
-   what `cfg`, `apt` or `fs` answer about the system (a model or a setting the movie player reads), the timing of
-   `y2r:u`'s transfer-end event, an FS request that fails differently (Azahar makes `CreateDirectory`,
-   `CreateExtSaveData` that we do not). A record of each thread's calls on both sides
-   (`tools/hos_trace_compare.py`) narrows it to the first that differs.
+1. **The title movie and title screen against Azahar**, frame by frame (`azahar_shots.sh` with the save from frame
+   2,600, `frame_compare.py`), then input: press Start (`$HOS_INPUT`, scripted buttons) and follow the game to the
+   save menu and the field, comparing as it goes.
 2. **Fog** in the fragment shader (`PicaFragment.c`, Azahar's generator as the reference), then the volcano shot (y9).
 3. **A render target written back to memory** when the game reads it as memory (the display transfer from VRAM to
    the linear heap seen at frame 0).

@@ -510,11 +510,11 @@ Performance comes first in every design choice, the more so for the seamless co-
      0x1AE400-0x1BFA20, 707 entries): inside, every return and jump goes on through the dispatch, as a CPU does;
    - addresses a literal pool holds inside a function are entries (157), and a thread whose return no frame took goes
      on at that address (the thread exit at 00131FD8, reached from a function run on its own stack, 001C15C0).
-   **Where it stands:** the game runs past the opening; then (with the owner's save) Azahar shows the title movie, and
-   we show a white screen: the game decodes video frames (`y2r:u`, 480 conversions) but issues no draw at all. (A
-   first comparison of the calls with Azahar's, `tools/call_counts_compare.py`, was not over the same span: Azahar's
-   counting run stopped at frame 2,564, before the movie, about frame 3,000; it proves nothing about `y2r:u`. To redo
-   with Azahar's run reaching the movie.)
+   **Where it stands:** the game runs through the opening, the title movie and to the title screen ("POKÉMON RUBIS
+   OMÉGA / APPUYEZ SUR START"). The last two blockers: a thread that ended holding a mutex (the 3DS kernel releases
+   them: Azahar's ReleaseThreadMutexes), the main thread waiting behind it for ever; and the GPU's immediate mode
+   (vertices given through the default attribute registers, index 0xF), with which the movie is drawn. Next: the movie
+   and the title compared with Azahar frame by frame, then input.
 
 ## 11. The renderer's architecture (step 4; owner's request, 5 November. Built since, first form: src/platform/Pica*.c and VulkanRenderer.c, the opening rendered as Azahar's, §10; not yet fast)
 
