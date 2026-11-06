@@ -145,7 +145,9 @@ static void frame(int s)
     }
 }
 
-void hos_dsp_sources_tick(void)
+unsigned long long hos_dsp_frames_waited; /* frames put off: the game had not written a new frame */
+
+int hos_dsp_sources_tick(void)
 {
     uint8_t* dsp = hos_pointer(HOS_DSP);
     uint8_t* r0 = dsp + 0x50000, *r1 = dsp + 0x70000;
@@ -157,6 +159,22 @@ void hos_dsp_sources_tick(void)
         read_first = 1;
     else
         read_first = f0 > f1 ? 0 : 1;
+    /* a frame only once the game has written a new one (its counter moved). The DSP's frames and the game's alternate on
+       the 3DS: the game always handles a frame's statuses within the DSP's 4.89 ms. Here a draw of ours holds the
+       kernel lock for tens of ms and the clock then caught up by running frames back to back: the second one wrote
+       the statuses again with current_buffer_id_dirty cleared, so the game never saw a buffer retire, kept it queued,
+       later reused it and closed its source queue on itself (6 November: the opening's freeze, 00190C28 looping on a
+       circular list; seen in the statuses the game read: current buffer 44, its queue's head 43, never the dirty flag).
+       A slow frame of ours now delays the sound instead. */
+    static int seen;
+    static uint16_t last_counter;
+    const uint16_t counter = read_first == 0 ? f0 : f1;
+    if (seen && counter == last_counter) {
+        hos_dsp_frames_waited++;
+        return 0;
+    }
+    seen = 1;
+    last_counter = counter;
     uint8_t* read = read_first == 0 ? r0 : r1;
     uint8_t* write = read_first == 0 ? r1 : r0;
     for (int s = 0; s < SOURCES; s++) {
@@ -173,4 +191,5 @@ void hos_dsp_sources_tick(void)
         wr16(st + 8, (uint16_t)source[s].current_id);
         wr16(st + 10, (uint16_t)source[s].last_id);
     }
+    return 1;
 }

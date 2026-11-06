@@ -62,8 +62,8 @@ static void write_structure_addresses(void)
 static void tick(void)
 {
     if (state == ON) {
-        hos_dsp_sources_tick(); /* the sources' statuses (DspSource.c), as Azahar's GenerateCurrentFrame writes them */
-        signal_event(pipe_interrupt[PIPE_AUDIO]);
+        if (hos_dsp_sources_tick()) /* the sources' statuses (DspSource.c), as Azahar's GenerateCurrentFrame writes them */
+            signal_event(pipe_interrupt[PIPE_AUDIO]);
     }
 }
 

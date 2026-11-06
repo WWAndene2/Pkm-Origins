@@ -195,8 +195,9 @@ void hos_gsp_report(void)
 {
     hos_gpu_trace_write();
     renderer_report();
-    fprintf(stderr, "hos: %llu GPU command lists, %llu VBlanks\n", (unsigned long long)command_lists,
-            (unsigned long long)frames);
+    extern unsigned long long hos_dsp_frames_waited;
+    fprintf(stderr, "hos: %llu GPU command lists, %llu VBlanks; audio frames put off (the game behind) %llu\n",
+            (unsigned long long)command_lists, (unsigned long long)frames, hos_dsp_frames_waited);
 }
 
 static const HosCommandEntry commands[] = {
