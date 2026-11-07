@@ -182,6 +182,8 @@ void hos_make_ready(HosThread* t)
 
 
 /* a loop head of the translated code, the flag set: the CPU to the thread that outranks this one, if one is ready */
+void hos_preempt_check(HosThread* t);
+
 void hos_preempt_point(Cpu* c)
 {
     pthread_mutex_lock(&hos_lock);

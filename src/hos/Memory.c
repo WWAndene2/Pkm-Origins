@@ -7,6 +7,7 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 uint8_t* hos_memory;
@@ -14,7 +15,8 @@ static int file = -1;
 
 int hos_memory_init(void)
 {
-    file = memfd_create("hos_memory", 0);
+    file = (int)syscall(SYS_memfd_create, "hos_memory", 0); /* (the call itself: Android's libc declares
+                                                                memfd_create only from API 30, the kernel has it) */
     if (file < 0 || ftruncate(file, (off_t)1 << 32))
         return -1;
     void* p = mmap(NULL, (size_t)1 << 32, PROT_NONE, MAP_SHARED | MAP_NORESERVE, file, 0);

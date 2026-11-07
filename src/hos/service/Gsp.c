@@ -54,7 +54,7 @@ static void signal_for(uint32_t id, int interrupt)
     hos_object_wake(threads[id].event);
 }
 
-static void signal(int interrupt) /* (under hos_lock, no game code running: in a system call, or by hos_defer) */
+static void raise_interrupt(int interrupt) /* (under hos_lock, no game code running: in a system call, or by hos_defer) */
 {
     if (interrupt == PDC0 || interrupt == PDC1) {
         for (uint32_t id = 0; id < MAX_THREADS; id++)
@@ -212,8 +212,8 @@ static void vblank(void)
     if (!memory)
         return;
     frames++;
-    hos_defer(signal, PDC0); /* (the clock's thread: written when no game code runs, hos_defer) */
-    hos_defer(signal, PDC1);
+    hos_defer(raise_interrupt, PDC0); /* (the clock's thread: written when no game code runs, hos_defer) */
+    hos_defer(raise_interrupt, PDC1);
 }
 
 static void ok(HosRequest* q)
@@ -318,12 +318,12 @@ static void run_command(const uint32_t* w, int locked)
         return;
     if (locked) { /* (in the game's system call) */
         for (int k = 0; k < n; k++)
-            signal(interrupts[k]);
+            raise_interrupt(interrupts[k]);
         return;
     }
     pthread_mutex_lock(&hos_lock); /* (the GPU's thread: written when no game code runs, hos_defer) */
     for (int k = 0; k < n; k++)
-        hos_defer(signal, interrupts[k]);
+        hos_defer(raise_interrupt, interrupts[k]);
     pthread_mutex_unlock(&hos_lock);
 }
 
