@@ -521,6 +521,19 @@ Performance comes first in every design choice, the more so for the seamless co-
    (put off to the next tick, each cost a whole period). A profile (`tools/sample_stacks.py`) puts the rest in the
    vertex shaders run on the CPU, then the frames written to disk and the GPU trace of the test build: the vertex
    shaders on the GPU are next (AGENT_HANDOFF.md, next steps).
+   **The vertex shaders on the GPU (7 November).** Two compute passes a draw (`VulkanVertexShader.c`), in a command
+   buffer submitted before the frame's drawing: the translated program once for each vertex the draw uses, then the
+   triangles assembled as the CPU does, into the vertex ring the drawing reads (immediate mode and the geometry shader
+   stay on the CPU). The first form was slower than the CPU (734 frames against 1,569 in 120 s): the translation wrote
+   the whole 4,096-word program memory as a switch in a loop, 148 KB of GLSL a shader, and the cache key missed when
+   the game rewrote other programs. Now only the reachable instructions are keyed, and the program is unrolled for the
+   draw's boolean and integer uniforms (`pica_shader_glsl_baked`: the interpreter's flow run at translation time, ifs
+   on the condition codes only; the game's programs are uber-shaders of about 450 reachable instructions, 40 KB of GLSL
+   once unrolled). Measured, alternated: CPU 1,609 / 1,684, GPU 1,942 / 1,944 top-screen frames in 120 s (lavapipe).
+   Checked draw by draw against the CPU in a diagnostic build: 104,000 draws, none beyond 1e-5 relative; the floats
+   not bit-equal (from the title movie on) are the GPU's rcp / rsq / ex2 / lg2, the same count with the switch form.
+   Not yet compared with Azahar's shots. The profile now: the render thread waits on lavapipe's work and the frames
+   written to disk; a game thread spins in `hos_arbitrate` (f_0015EB4C).
 
 ## 11. The renderer's architecture (step 4; owner's request, 5 November. Built since, first form: src/platform/Pica*.c and VulkanRenderer.c, the opening rendered as Azahar's, §10; not yet fast)
 

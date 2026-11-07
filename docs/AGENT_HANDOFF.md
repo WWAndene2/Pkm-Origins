@@ -5,7 +5,7 @@ The state of the work and how to carry it on, for an agent starting cold (owner'
 owner in French or in the language they write in). The plan and its history: `docs/RECOMPILATION_PLAN.md` (§10 for
 what is done, §11 for the renderer). This file says where things stand and what to do next; the plan holds the why.
 
-## Where it stands (6 November)
+## Where it stands (7 November)
 
 - **Translation:** Omega Ruby's .code and its 145 CRO modules translate to C and compile (`tools/build_game.py`):
   26,486 functions (369 of them entries), 60 stubs. Proven function by function against the original in Unicorn
@@ -14,8 +14,11 @@ what is done, §11 for the renderer). This file says where things stand and what
 - **Runtime (`src/hos/`):** the game boots, plays its opening cinematic to the end and goes past it. No freeze left
   that is known (the DSP one is fixed: `DspSource.c`).
 - **Renderer (`src/platform/`):** Vulkan, headless, frames to PPM. The opening matches Azahar's shots (29 of 36 within
-  2.5 / 255). One submission a frame (6 November); the vertex shaders still on the CPU, which is now where the time
-  goes. The immediate mode (the title movie) is done.
+  2.5 / 255). One submission a frame (6 November); the vertex shaders on the GPU (7 November, `VulkanVertexShader.c`,
+  +18 % on lavapipe; `HOS_VERTEX_CPU=1` for the CPU path), immediate mode and the geometry shader still on the CPU.
+  The immediate mode (the title movie) is done.
+- **X:** translates and compiles (7 November: 11 stubs), but stops at its first frame with the owner's X save (fault 9
+  at 0049D57C); Azahar boots the same save to its title. Not looked into (owner, 7 November: not now).
 - **Where the game gets (6 November, end of session):** the opening, the title movie and the title screen
   ("POKÉMON RUBIS OMÉGA / APPUYEZ SUR START"), with the owner's save. The last two fixes: a thread ending releases the
   mutexes it holds (the main thread waited for ever behind one), and the GPU's immediate mode (the movie is drawn
@@ -24,7 +27,25 @@ what is done, §11 for the renderer). This file says where things stand and what
 ## How to work (the loop)
 
 Everything runs in the session's scratch space (`$S` below); the owner's game files are fetched there, never into the
-repository. `$S/work/oras` holds the extracted game (code.bin, cro/, save/), `$S/work/dumps/oras.3ds` the ROM,
+repository.
+
+**Setting up a fresh session (7 November, about 45 minutes, mostly Azahar's build):**
+1. `apt-get install -y libvulkan-dev mesa-vulkan-drivers vulkan-tools glslang-tools libegl-dev`;
+   `pip install unicorn capstone pillow`.
+2. Pomegrade's `tools/remake/headless/session_setup.sh $S/work dumps` then `core`, with
+   `POMEGRADE_ORAS_DRIVE_ID` / `POMEGRADE_X_DRIVE_ID` set to the ids of the .3ds files in the owner's Drive folder
+   "Pokemon Project - Radiant Platinum" (find them with the Drive connector). No Omega Ruby save is on Drive: the
+   setup uses Pomegrade's `headless/saves/main_Startpoint`. X's save is the Drive file "Pkm XY save - main".
+3. `tools/n3ds_extract.py $S/work/dumps/oras.3ds $S/work/oras` (and x); in each extracted folder: `save/main` and
+   `save.metadata` (the game's own save: never another game's), `shared_font.bin` (`tools/make_shared_font.py`), the
+   three system archives (`tools/make_system_archive.py`, from Azahar's `externals/open_source_archives/include`), and
+   `config`: the console configuration, without which the game faults at boot. Take it from any Azahar run:
+   `runs/<name>/Azahar/nand/data/<0s>/sysdata/00010017/00000000/config`.
+4. The memory for `match_functions.py --ram`: a run of `run_local.sh` with `dump 0x00100000 0x00700000
+   ../ram_oras/code.bin` and the same for heap (0x08000000, 0x06000000), linear (0x14000000, 0x08000000) and stack
+   (0x0FF00000, 0x00100000). Addresses with 0x (they are read in base 0: a leading 0 is octal), paths relative to the
+   run's folder, which is emptied when the run starts.
+5. `tools/build_and_run.sh $S 180` (translation about 10 minutes alone; not beside Azahar's build). `$S/work/oras` holds the extracted game (code.bin, cro/, save/), `$S/work/dumps/oras.3ds` the ROM,
 `$S/build_oras_mod` the build. Pomegrade (the owner's other repository, read only here) holds Azahar and its headless
 runner.
 
@@ -65,10 +86,10 @@ Lessons that cost time, so they are not paid twice:
 The owner chose (6 November): finish the renderer first, speed first, faithful at every step (each change measured
 with `render_bench.sh` and checked against Azahar's shots).
 
-1. **The vertex shaders on the GPU**: the biggest share of the time left (`sample_stacks.py`, 6 November). The PICA
-   shader to GLSL translator exists and is tested (`src/platform/PicaShaderGlsl.c`, 300 random programs equal to the
-   interpreter on lavapipe); the vertex loaders' attributes to a vertex buffer, the uniforms to a buffer, the
-   geometry shader and immediate mode kept on the CPU path at first.
+1. ~~The vertex shaders on the GPU~~ (done 7 November). Left on that path: the loaders still read the attributes on
+   the CPU (to move to vertex buffers read by the shader), the geometry shader and immediate mode on the CPU, a
+   comparison with Azahar's shots, and the pipelines made in play (each new combination of a program and its
+   booleans is compiled when first drawn: to make ahead, §11.8).
 2. **The renderer on its own thread**: it holds the kernel lock while it draws today (the cause of the DSP freeze).
 3. **A build without the GPU trace** (`build_game.py` without `--gpu-trace`) for the speed of the game code itself;
    the trace instruments every store.
