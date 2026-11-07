@@ -42,7 +42,7 @@ def main():
     p.add_argument("--crop", help="x,y,w,h of the screen kept")
     p.add_argument("--zoom", type=int, default=1, help="with --crop: enlarged this many times (nearest)")
     a = p.parse_args()
-    frames = [f for f in sorted(glob.glob(os.path.join(a.frames, "frame_*_%s.ppm" % a.address)))
+    frames = [f for f in sorted(glob.glob(os.path.join(a.frames, "frame_*_%s.ppm" % a.address)), key=number)
               if a.first <= number(f) <= a.last][::a.every]
     if not frames:
         raise SystemExit("no frames of %s in %s between %d and %d" % (a.address, a.frames, a.first, a.last))

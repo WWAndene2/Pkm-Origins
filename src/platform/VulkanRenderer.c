@@ -855,7 +855,7 @@ void vk_renderer_display(uint32_t source)
         if (!px)
             return;
         char path[700];
-        snprintf(path, sizeof path, "%s/frame_%04u_%08X.ppm", dir, frame_count++, source);
+        snprintf(path, sizeof path, "%s/frame_%06u_%08X.ppm", dir, frame_count++, source);
         FILE* f = fopen(path, "wb");
         if (f) {
             fprintf(f, "P6\n%u %u\n255\n", w, h);

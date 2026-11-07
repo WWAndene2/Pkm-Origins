@@ -78,7 +78,8 @@ def main():
     p.add_argument("--any-order", action="store_true", help="each shot searched among all our frames")
     p.add_argument("--window", type=int, default=400, help="frames of ours searched after the previous shot's")
     a = p.parse_args()
-    ours = sorted(glob.glob(os.path.join(a.ours, "frame_*_%s.ppm" % a.address)))
+    ours = sorted(glob.glob(os.path.join(a.ours, "frame_*_%s.ppm" % a.address)),
+                  key=lambda f: int(os.path.basename(f).split("_")[1]))  # (by number: 9999 < 10000)
     if not ours:
         raise SystemExit("no frames of %s in %s" % (a.address, a.ours))
     small = [(k, screen_view(f).resize((100, 60))) for k, f in enumerate(ours) if k % a.step == 0]
