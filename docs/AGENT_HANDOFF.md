@@ -115,8 +115,14 @@ with `render_bench.sh` and checked against Azahar's shots).
    Speed, end of 7 November: on the field the GPU thread waits on lavapipe (the pixels drawn on the CPU), the game's
    code barely shows; what is left to optimise (vertex attributes read on the GPU, pipelines made ahead) cannot be
    measured here. The owner agreed (7 November): the window and Android next, speed measured there.
-5. **A window on PC, then Android** (the owner's phone: Mali): **the next step.** Check there that the device has
-   `shaderSignedZeroInfNanPreserveFloat32` (the shader translation's exactness, PicaShaderGlsl.h).
+5. **Android, the game compiled on the phone** (owner's choice, 7 November, instead of a PC window first: the owner has
+   no PC; RECOMPILATION_PLAN.md §7). Done so far: `src/` builds for ARM64 with the NDK (`/opt/android-sdk`, ndk
+   27.2.12479018, installed by `sdkmanager` from dl.google.com), and the first APK (`tools/build_android.sh`,
+   `src/platform/android/`) ran on the owner's Xiaomi 13T (7 November): the Vulkan window, touch, and **green**: the
+   GPU has `shaderSignedZeroInfNanPreserveFloat32`, so the shader translation stays exact there. The translated
+   game's C compiles with the NDK's clang (part0.c: 30 s on one core here). Next, in order: the translator in C
+   (checked byte for byte against the Python one's output over the whole game), the extraction in C, a C compiler in
+   the app, then the game in the window (touch and buttons, then sound).
 6. Then the coverage of what the game uses (services, GPU features: from call counts at many moments) and mass
    comparisons with Azahar (saves at many places, scripted input), with a blame by elimination when a scene differs.
    The title movie and title screen are not yet compared frame by frame.
