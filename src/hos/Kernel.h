@@ -111,6 +111,16 @@ void hos_clock_start(void);               /* the clock thread: timeouts and time
 void hos_clock_kick(void);                /* a new deadline: the clock thread looks again */
 void hos_clock_every(int64_t period_ns, void (*run)(void)); /* run every period, by the clock thread, under hos_lock */
 
+/* Work that writes what the game's code may be reading with ldrex / strex (a service's queue in shared memory: GSP's
+ * interrupts), from a host thread other than the game's (the clock, the GPU's thread). The translated strex stores
+ * whenever its own ldrex opened the monitor (tools/arm2c.py): another host thread's store in between is overwritten,
+ * and GSP's interrupts were lost that way once the GPU got a thread of its own (7 November: the game stopped
+ * presenting frames). So such work runs when no game code runs: at once when no thread holds the CPU, else by the
+ * thread holding it at its next system call or loop head (never between an ldrex and its strex: neither has a system
+ * call or a loop head between them). Both under hos_lock. */
+void hos_defer(void (*run)(int arg), int arg);
+void hos_deferred_run(void);
+
 /* waiting (Sync.c) */
 HosResult hos_wait(HosThread* t, HosObject** objects, int count, int wait_all, int64_t timeout_ns, int32_t* index);
 int hos_object_ready_for(HosObject* o, HosThread* t);

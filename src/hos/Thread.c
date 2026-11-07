@@ -186,6 +186,7 @@ void hos_preempt_point(Cpu* c)
 {
     pthread_mutex_lock(&hos_lock);
     hos_preempt_pending = 0;
+    hos_deferred_run();
     HosThread* t = hos_thread_of(c);
     if (t && hos_current == t)
         hos_preempt_check(t);
@@ -201,6 +202,36 @@ void hos_preempt_check(HosThread* t)
         enqueue(t, 1);
         dispatch();
         wait_cpu(t);
+    }
+}
+
+/* Work for a moment when no game code runs (Kernel.h): a ring, run under hos_lock by the thread holding the CPU at its
+ * next system call or loop head, or at once when no thread holds it. */
+enum { DEFERRED = 1024 };
+static struct { void (*run)(int); int arg; } deferred[DEFERRED];
+static unsigned deferred_head, deferred_tail;
+
+void hos_defer(void (*fn)(int), int arg)
+{
+    if (!hos_current) {
+        fn(arg);
+        return;
+    }
+    if (deferred_tail - deferred_head >= DEFERRED) { /* (full: the oldest run now, as before this ring existed) */
+        deferred[deferred_head % DEFERRED].run(deferred[deferred_head % DEFERRED].arg);
+        deferred_head++;
+    }
+    deferred[deferred_tail % DEFERRED].run = fn;
+    deferred[deferred_tail % DEFERRED].arg = arg;
+    deferred_tail++;
+    hos_preempt_pending = 1; /* (the running thread stops at its next loop head) */
+}
+
+void hos_deferred_run(void)
+{
+    while (deferred_head != deferred_tail) {
+        const unsigned k = deferred_head++ % DEFERRED;
+        deferred[k].run(deferred[k].arg);
     }
 }
 

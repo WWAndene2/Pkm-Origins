@@ -141,6 +141,7 @@ void hos_svc(Cpu* c, uint32_t n)
             fprintf(stderr, "hos: thread %u made a system call (%02X, lr %08X) without holding the CPU (thread %u does)\n",
                     t ? t->id : 0, n, r[14], hos_current ? hos_current->id : 0);
     }
+    hos_deferred_run(); /* (work held back while this thread ran game code: hos_defer) */
     /* HOS_TRACE=1: each call printed as Pomegrade's code trace records Azahar's (tools/hos_trace_compare.py) */
     static int trace = -1;
     if (trace < 0)

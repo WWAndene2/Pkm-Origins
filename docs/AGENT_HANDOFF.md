@@ -90,7 +90,11 @@ with `render_bench.sh` and checked against Azahar's shots).
    the CPU (to move to vertex buffers read by the shader), the geometry shader and immediate mode on the CPU, a
    comparison with Azahar's shots, and the pipelines made in play (each new combination of a program and its
    booleans is compiled when first drawn: to make ahead, §11.8).
-2. **The renderer on its own thread**: it holds the kernel lock while it draws today (the cause of the DSP freeze).
+2. ~~The renderer on its own thread~~ (done 7 November: the GPU's thread in `Gsp.c`, the commands in order, each
+   interrupt raised when done; +23 % on lavapipe; `HOS_GPU_SYNC=1` for the old way). Its interrupts, and the VBlanks,
+   are written through `hos_defer` (Kernel.h): written from another host thread while the game ran, they were lost
+   to its ldrex / strex (the game stopped presenting frames in 2 runs of 7). 6 runs of 120 s after the fix: none
+   stopped. Seen once before the fix and not looked into: a run that did not end on SIGINT.
 3. **A build without the GPU trace** (`build_game.py` without `--gpu-trace`) for the speed of the game code itself;
    the trace instruments every store.
 4. **Fog**, then **a render target written back to memory** when the game reads it as memory.

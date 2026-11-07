@@ -8,7 +8,9 @@
  * counted, the first one reported. */
 #include "../Ipc.h"
 
+#include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../GpuTrace.h"
@@ -52,7 +54,7 @@ static void signal_for(uint32_t id, int interrupt)
     hos_object_wake(threads[id].event);
 }
 
-static void signal(int interrupt)
+static void signal(int interrupt) /* (under hos_lock, no game code running: in a system call, or by hos_defer) */
 {
     if (interrupt == PDC0 || interrupt == PDC1) {
         for (uint32_t id = 0; id < MAX_THREADS; id++)
@@ -99,8 +101,8 @@ static void vblank(void)
     if (!memory)
         return;
     frames++;
-    signal(PDC0);
-    signal(PDC1);
+    hos_defer(signal, PDC0); /* (the clock's thread: written when no game code runs, hos_defer) */
+    hos_defer(signal, PDC1);
 }
 
 static void ok(HosRequest* q)
@@ -157,6 +159,118 @@ static void write_hw_regs(HosRequest* q, int masked)
 static void write_hw_regs_plain(HosRequest* q) { write_hw_regs(q, 0); }
 static void write_hw_regs_masked(HosRequest* q) { write_hw_regs(q, 1); }
 
+/* one command run as the GPU runs it, then its interrupt raised (under hos_lock: locked says whether the caller holds
+   it; the work itself needs it not, it touches only the game's memory and the renderer) */
+static void run_command(const uint32_t* w, int locked)
+{
+    int interrupts[2], n = 0;
+    switch (w[0] & 0xFF) {
+    case 0: /* RequestDma: source, destination, size */
+        memmove(hos_pointer(w[2]), hos_pointer(w[1]), w[3]);
+        interrupts[n++] = DMA;
+        break;
+    case 1: /* SubmitCmdList: address, size */
+        renderer_submit_list(w[1], w[2]);
+        interrupts[n++] = P3D;
+        break;
+    case 2: /* MemoryFill: start1, value1, end1, start2, value2, end2, controls (each 16 bits: width in 8-9) */
+        if (w[1])
+            renderer_fill(w[1], w[3], w[2], w[7] >> 8 & 3);
+        if (w[4])
+            renderer_fill(w[4], w[6], w[5], w[7] >> 24 & 3);
+        if (w[1])
+            interrupts[n++] = PSC0;
+        if (w[4])
+            interrupts[n++] = PSC1;
+        break;
+    case 3: /* DisplayTransfer: input, output, sizes, flags */
+    case 4: /* TextureCopy: input, output, size, input width / gap, output width / gap, flags */
+        /* (either command is a texture copy when its flags say so, bit 3, as Azahar's MemoryTransfer decides: a
+           DisplayTransfer's flags are its w[5], a TextureCopy's its w[6]) */
+        if ((w[0] & 0xFF) == 4 ? w[6] >> 3 & 1 : w[5] >> 3 & 1)
+            texture_copy(w[1], w[2], (w[0] & 0xFF) == 4 ? w[3] : 0, (w[0] & 0xFF) == 4 ? w[4] : 0,
+                         (w[0] & 0xFF) == 4 ? w[5] : 0);
+        else
+            renderer_display(w[1]);
+        interrupts[n++] = PPF;
+        break;
+    default: /* CacheFlush */
+        break;
+    }
+    if (!n)
+        return;
+    if (locked) { /* (in the game's system call) */
+        for (int k = 0; k < n; k++)
+            signal(interrupts[k]);
+        return;
+    }
+    pthread_mutex_lock(&hos_lock); /* (the GPU's thread: written when no game code runs, hos_defer) */
+    for (int k = 0; k < n; k++)
+        hos_defer(signal, interrupts[k]);
+    pthread_mutex_unlock(&hos_lock);
+}
+
+/* The GPU's own thread (AGENT_HANDOFF.md, next step 2 of 6 November). The commands were run inside the game's
+ * TriggerCmdReqQueue, holding the kernel's lock and the game's one CPU: no other game thread ran, nor the clock (the
+ * VBlanks, the DSP's frames: the DSP freeze of 6 November), while a frame was drawn. As on the 3DS, whose GPU works
+ * beside the CPU, the commands now go in order to a thread of their own, which runs each and raises its interrupt
+ * when it is done; the game waits for that interrupt where it already did. The order of all the commands is kept (a
+ * DMA or a fill after a list runs after it). $HOS_GPU_SYNC=1 runs them in the call, as before (Azahar's way: it
+ * answers at once). */
+enum { GPU_QUEUE = 256 };
+static uint32_t gpu_commands[GPU_QUEUE][8];
+static unsigned gpu_head, gpu_tail; /* (taken at head, added at tail; equal: empty) */
+static pthread_mutex_t gpu_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t gpu_added = PTHREAD_COND_INITIALIZER, gpu_taken = PTHREAD_COND_INITIALIZER;
+
+static void* gpu_thread(void* arg)
+{
+    (void)arg;
+    for (;;) {
+        pthread_mutex_lock(&gpu_mutex);
+        while (gpu_head == gpu_tail)
+            pthread_cond_wait(&gpu_added, &gpu_mutex);
+        uint32_t w[8];
+        memcpy(w, gpu_commands[gpu_head % GPU_QUEUE], sizeof w);
+        pthread_mutex_unlock(&gpu_mutex);
+        run_command(w, 0);
+        pthread_mutex_lock(&gpu_mutex);
+        gpu_head++; /* (taken only once done: a full queue's waiter, and gpu_idle, see it finished) */
+        pthread_cond_broadcast(&gpu_taken);
+        pthread_mutex_unlock(&gpu_mutex);
+    }
+    return NULL;
+}
+
+static int gpu_async(void)
+{
+    static int state = -1;
+    if (state < 0) {
+        state = !getenv("HOS_GPU_SYNC");
+        pthread_t t;
+        if (state && pthread_create(&t, NULL, gpu_thread, NULL))
+            state = 0;
+    }
+    return state;
+}
+
+/* a command to the GPU's thread (called under hos_lock: let go while the queue is full) */
+static void gpu_queue(const uint32_t* w)
+{
+    pthread_mutex_lock(&gpu_mutex);
+    while (gpu_tail - gpu_head >= GPU_QUEUE) {
+        pthread_mutex_unlock(&hos_lock); /* (the GPU's thread takes it to raise an interrupt) */
+        pthread_cond_wait(&gpu_taken, &gpu_mutex);
+        pthread_mutex_unlock(&gpu_mutex);
+        pthread_mutex_lock(&hos_lock);
+        pthread_mutex_lock(&gpu_mutex);
+    }
+    memcpy(gpu_commands[gpu_tail % GPU_QUEUE], w, 8 * 4);
+    gpu_tail++;
+    pthread_cond_signal(&gpu_added);
+    pthread_mutex_unlock(&gpu_mutex);
+}
+
 /* the commands of the thread holding the right, as GSP takes them (index and count in the buffer's first word) */
 static void trigger_cmd_req_queue(HosRequest* q)
 {
@@ -183,43 +297,16 @@ static void trigger_cmd_req_queue(HosRequest* q)
         memcpy(w, c, sizeof w);
         head = (head & ~0xFFFFu) | ((index + 1) % 0xF) | (count - 1) << 8;
         memcpy(buffer, &head, 4);
-        switch (w[0] & 0xFF) {
-        case 0: /* RequestDma: source, destination, size */
-            memmove(hos_pointer(w[2]), hos_pointer(w[1]), w[3]);
-            signal(DMA);
-            break;
-        case 1: /* SubmitCmdList: address, size */
-            hos_gpu_trace_list(w[1], w[2]);
-            renderer_submit_list(w[1], w[2]);
+        if ((w[0] & 0xFF) == 1) {
+            hos_gpu_trace_list(w[1], w[2]); /* (the test build's trace: the list as the game handed it over) */
             if (!command_lists++)
                 fprintf(stderr, "hos: the game's first GPU command list: %08X, %u bytes (frame %llu)\n", w[1], w[2],
                         (unsigned long long)frames);
-            signal(P3D);
-            break;
-        case 2: /* MemoryFill: start1, value1, end1, start2, value2, end2, controls (each 16 bits: width in 8-9) */
-            if (w[1])
-                renderer_fill(w[1], w[3], w[2], w[7] >> 8 & 3);
-            if (w[4])
-                renderer_fill(w[4], w[6], w[5], w[7] >> 24 & 3);
-            if (w[1])
-                signal(PSC0);
-            if (w[4])
-                signal(PSC1);
-            break;
-        case 3: /* DisplayTransfer: input, output, sizes, flags */
-        case 4: /* TextureCopy: input, output, size, input width / gap, output width / gap, flags */
-            /* (either command is a texture copy when its flags say so, bit 3, as Azahar's MemoryTransfer decides: a
-               DisplayTransfer's flags are its w[5], a TextureCopy's its w[6]) */
-            if ((w[0] & 0xFF) == 4 ? w[6] >> 3 & 1 : w[5] >> 3 & 1)
-                texture_copy(w[1], w[2], (w[0] & 0xFF) == 4 ? w[3] : 0, (w[0] & 0xFF) == 4 ? w[4] : 0,
-                             (w[0] & 0xFF) == 4 ? w[5] : 0);
-            else
-                renderer_display(w[1]);
-            signal(PPF);
-            break;
-        default: /* CacheFlush */
-            break;
         }
+        if (gpu_async())
+            gpu_queue(w);
+        else
+            run_command(w, 1);
     }
     ok(q);
 }
