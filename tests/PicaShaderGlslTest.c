@@ -10,8 +10,10 @@
  * precision, PicaShaderGlsl.h). The inputs are ordinary values, zeros of both signs, infinities and NaNs; no
  * denormals (a GPU may flush them: Vulkan leaves it to the device; f24 has none). Each exact opcode is first run
  * alone (24 programs each), so that a failure names its instruction. The shader carries
- * PICA_SHADER_GLSL_FLOAT_CONTROLS: without it lavapipe dropped signs of zero and NaNs. Last run (5 November, lavapipe):
- * 300 exact programs, 300 approximate, the flow programs: all passed. */
+ * PICA_SHADER_GLSL_FLOAT_CONTROLS: without it lavapipe dropped signs of zero and NaNs. Each program is checked in both
+ * forms, the switch form (pica_shader_glsl) and the unrolled one (pica_shader_glsl_baked), and a program branching on
+ * the condition codes (ifc, callc, jmpc, breakc) checks the unrolled form's ifs. Last run (7 November, lavapipe): 300
+ * exact programs, 300 approximate, the flow programs, both forms: all passed. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,12 +78,13 @@ static Buffer buffer(VkDeviceSize size)
 }
 
 static const char* work = ".";
+static int baked; /* the form checked: 0 pica_shader_glsl, 1 pica_shader_glsl_baked */
 
 /* the translated program in a compute shader: one invocation a vertex, its inputs in, its outputs out */
 static int run_gpu(const PicaShaderSetup* s, const float (*in)[16][4], float (*out)[16][4])
 {
     static char body[1 << 22], src[(1 << 22) + 4096];
-    if (pica_shader_glsl(s, 0, 100000, body, sizeof body) < 0)
+    if ((baked ? pica_shader_glsl_baked : pica_shader_glsl)(s, 0, 100000, body, sizeof body) < 0)
         return -1;
     snprintf(src, sizeof src,
              "#version 450\n%s"
@@ -219,8 +222,19 @@ static int ulps(float a, float b)
     return abs(x - y);
 }
 
-/* one program over VERTICES random vertices; approximate: the tolerance of the transcendental suite */
+static int check_form(const char* name, PicaShaderSetup* s, int approximate);
+
+/* one program over VERTICES random vertices, in both forms; approximate: the tolerance of the transcendental suite */
 static int check(const char* name, PicaShaderSetup* s, int approximate)
+{
+    int failed = 0;
+    for (baked = 0; baked < 2; baked++)
+        failed |= check_form(name, s, approximate);
+    baked = 0;
+    return failed;
+}
+
+static int check_form(const char* name, PicaShaderSetup* s, int approximate)
 {
     static float in[VERTICES][16][4], gpu[VERTICES][16][4];
     for (int n = 0; n < VERTICES; n++)
@@ -228,7 +242,7 @@ static int check(const char* name, PicaShaderSetup* s, int approximate)
             for (int c = 0; c < 4; c++)
                 in[n][r][c] = value();
     if (run_gpu(s, (const float (*)[16][4])in, gpu) < 0) {
-        printf("FAIL %s: not translated\n", name);
+        printf("FAIL %s (%s): not translated\n", name, baked ? "unrolled" : "switch");
         return 1;
     }
     int bad = 0;
@@ -243,7 +257,8 @@ static int check(const char* name, PicaShaderSetup* s, int approximate)
                 int ok = approximate ? (ulps(want, got) <= 3 || (fabsf(want - got) <= 0x1p-21f && fabsf(want) < 1))
                                      : same(want, got);
                 if (!ok && bad++ < 3)
-                    printf("FAIL %s: vertex %d o%d.%c: interpreter %a, GPU %a\n", name, n, r, "xyzw"[c], want, got);
+                    printf("FAIL %s (%s): vertex %d o%d.%c: interpreter %a, GPU %a\n", name,
+                           baked ? "unrolled" : "switch", n, r, "xyzw"[c], want, got);
             }
     }
     return bad != 0;
@@ -357,6 +372,35 @@ int main(int argc, char** argv)
         failed |= check("flow: nested loops, ifu, call, aL-indexed uniform", &s, 0);
         s.b[3] = 0;
         failed |= check("flow: the same with the else taken", &s, 0);
+    }
+    /* flow on the condition codes (the unrolled form's ifs, PicaShaderGlsl.h): ifc, callc, jmpc, breakc in a loop,
+       each way taken by some of the random vertices */
+    {
+        memset(&s, 0, sizeof s);
+        s.swizzle[0] = 0xFu | 0x1Bu << 5 | 0x1Bu << 14 | 0x1Bu << 23;
+        s.i[0][0] = 2; s.i[0][1] = 0; s.i[0][2] = 1;
+#define ARITH(op, d, a, b) ((uint32_t)(op) << 26 | (uint32_t)(d) << 21 | (uint32_t)(a) << 12 | (uint32_t)(b) << 7)
+        uint32_t c[] = {
+            0x2Eu << 26 | 2u << 24 | 4u << 21 | 0 << 12 | 1 << 7, /* 0 cmp v0.x < v1.x, v0.y > v1.y */
+            0x28u << 26 | 1u << 25 | 2u << 22 | 3 << 10 | 1,     /* 1 ifc cc.x: then 2, else 3 */
+            ARITH(0x00, 0x10, 0, 1),                              /* 2  add r0, v0, v1 */
+            ARITH(0x08, 0x10, 0, 1),                              /* 3  mul r0, v0, v1 (else) */
+            0x25u << 26 | 1u << 24 | 3u << 22 | 14 << 10 | 2,    /* 4 callc cc.y: 14-15 */
+            0x2Cu << 26 | 0u << 25 | 2u << 22 | 7 << 10,         /* 5 jmpc !cc.x to 7 */
+            ARITH(0x00, 0x11, 0x10, 2),                           /* 6 add r1, r0, v2 */
+            0x29u << 26 | 0 << 22 | 9 << 10,                      /* 7 loop i0 to 9 */
+            ARITH(0x00, 0x12, 0x12, 0x10),                        /* 8  add r2, r2, r0 */
+            0x23u << 26 | 1u << 24 | 3u << 22,                    /* 9  breakc cc.y */
+            ARITH(0x13, 0, 0x10, 0),                              /* 10 mov o0, r0 */
+            ARITH(0x13, 1, 0x11, 0),                              /* 11 mov o1, r1 */
+            ARITH(0x13, 2, 0x12, 0),                              /* 12 mov o2, r2 */
+            0x22u << 26,                                          /* 13 end */
+            ARITH(0x08, 0x11, 0x11, 3),                           /* 14 mul r1, r1, v3 */
+            ARITH(0x00, 0x12, 0x12, 3),                           /* 15 add r2, r2, v3 */
+        };
+#undef ARITH
+        memcpy(s.code, c, sizeof c);
+        failed |= check("flow on the condition codes: ifc, callc, jmpc, breakc", &s, 0);
     }
     printf("%d exact programs, %d approximate, flow control: %s\n", exact, approx, failed ? "FAILED" : "all passed");
     return failed;

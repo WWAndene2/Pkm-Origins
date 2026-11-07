@@ -36,4 +36,20 @@
    returns its length, or -1 when out is too small. max_steps bounds the instructions run, as the interpreter's. */
 long pica_shader_glsl(const PicaShaderSetup* setup, uint32_t entry, uint32_t max_steps, char* out, size_t size);
 
+/* The unrolled form: the same results as pica_shader_glsl's for the boolean and integer uniforms setup holds now
+ * (they are read here, at translation, not at run time). The interpreter's flow is run at translation time: jumps,
+ * calls, ifs and loops on those uniforms decided, loops unrolled, only the instructions on the path written out, in
+ * order, with no program counter; an instruction on the condition codes (ifc, callc, jmpc, breakc) becomes an if on
+ * them, whose two paths meet again at the if's end or the call's return, or run on separately to the program's end.
+ * Straight code, instead of a loop over a switch with stacks, for the GPU's compiler and its run (6 November: the switch
+ * form, 450 instructions of an uber-shader, made the GPU path slower than the CPU's interpreter on lavapipe). Returns -1
+ * (and the caller uses pica_shader_glsl) when out is too small, the code would pass BAKED_LIMIT instructions, a path
+ * would reach max_steps, or the program emits (a geometry shader). */
+long pica_shader_glsl_baked(const PicaShaderSetup* setup, uint32_t entry, uint32_t max_steps, char* out, size_t size);
+
+/* A key of what pica_shader_glsl writes for (setup, entry): the instructions reachable from entry, their places and
+   operand descriptors (the rest of the program memory, which the game rewrites with other programs, left out); equal
+   keys give the same GLSL (but for max_steps). */
+uint64_t pica_shader_glsl_key(const PicaShaderSetup* setup, uint32_t entry);
+
 #endif
