@@ -10,6 +10,7 @@
 #include "PicaFragment.h"
 #include "PicaTexture.h"
 #include "PicaVertex.h"
+#include "VulkanVertexShader.h"
 
 #define BITS(w, at, n) (((w) >> (at)) & ((1u << (n)) - 1))
 #define VK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) { fprintf(stderr, "vulkan: %s: %d\n", #x, r_); return; } } while (0)
@@ -21,6 +22,8 @@ static VkQueue queue;
 static uint32_t qfam;
 static VkCommandPool cmd_pool;
 static VkCommandBuffer cmd;
+static VkCommandBuffer ccmd; /* the vertex shaders' compute work, submitted before cmd (VulkanVertexShader.h) */
+static int crecording;
 static VkFence fence;
 static VkPhysicalDeviceMemoryProperties memprops;
 static VkDescriptorSetLayout set_layout;
@@ -91,7 +94,12 @@ static void submit(void)
 {
     submits++;
     vkEndCommandBuffer(cmd);
-    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &cmd};
+    VkCommandBuffer both[2] = {ccmd, cmd};
+    if (crecording)
+        vkEndCommandBuffer(ccmd);
+    /* (the compute work first: cmd starts with a barrier on every earlier command, record()) */
+    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, crecording ? 2u : 1u, crecording ? both : &cmd};
+    crecording = 0;
     vkResetFences(dev, 1, &fence);
     vkQueueSubmit(queue, 1, &si, fence);
     vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
@@ -103,11 +111,27 @@ static int recording;      /* the command buffer is open */
 static int open_target = -1; /* the render target whose render pass is open, or -1 */
 static VkDeviceSize min_ubo_align = 256, min_ssbo_align = 256;
 
+static void barrier_all(void);
+
 static void record(void)
 {
     if (!recording) {
         begin();
         recording = 1;
+        barrier_all(); /* (the vertices the compute command buffer writes, before any draw reads them) */
+    }
+}
+
+/* the compute command buffer open */
+static void record_compute(void)
+{
+    record();
+    if (!crecording) {
+        vkResetCommandBuffer(ccmd, 0);
+        VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL,
+                                       VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+        vkBeginCommandBuffer(ccmd, &bi);
+        crecording = 1;
     }
 }
 
@@ -210,6 +234,18 @@ static const char vertex_glsl[] =
     "    gl_Position = vec4(vert_position.x, vert_position.y, -vert_position.z, vert_position.w);\n"
     "}\n";
 
+/* make_buffer for VulkanVertexShader.c */
+static int vertex_buffer(VkBuffer* buf, VkDeviceMemory* mem, void** map, VkDeviceSize size, VkBufferUsageFlags usage)
+{
+    Buffer b;
+    if (make_buffer(&b, size, usage))
+        return -1;
+    *buf = b.buf;
+    *mem = b.mem;
+    *map = b.map;
+    return 0;
+}
+
 int vk_renderer_init(void)
 {
     if (ready != -2)
@@ -244,6 +280,7 @@ int vk_renderer_init(void)
     VkCommandBufferAllocateInfo cai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, NULL, cmd_pool,
                                        VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1};
     VKI(vkAllocateCommandBuffers(dev, &cai, &cmd));
+    VKI(vkAllocateCommandBuffers(dev, &cai, &ccmd));
     VkFenceCreateInfo fi = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VKI(vkCreateFence(dev, &fi, NULL, &fence));
 
@@ -279,8 +316,11 @@ int vk_renderer_init(void)
     vkGetPhysicalDeviceProperties(phys, &pp);
     min_ubo_align = pp.limits.minUniformBufferOffsetAlignment;
     min_ssbo_align = pp.limits.minStorageBufferOffsetAlignment;
-    fprintf(stderr, "renderer: Vulkan on %s, frames in %s\n", pp.deviceName, dir);
     ready = 0;
+    const VkVertexContext vc = {dev, min_ssbo_align, vertex_buffer, shader};
+    const int gpu_vertices = !vk_vertex_init(&vc);
+    fprintf(stderr, "renderer: Vulkan on %s, frames in %s, vertex shaders on the %s\n", pp.deviceName, dir,
+            gpu_vertices ? "GPU" : "CPU");
     return 0;
 }
 
@@ -639,6 +679,7 @@ static void rings_reset(void)
     vertex_used = 0;
     uniform_used = lut_used = sets_used = 0;
     staging_used = 0;
+    vk_vertex_reset();
     vkResetDescriptorPool(dev, desc_pool, 0);
 }
 
@@ -647,7 +688,7 @@ static int rings_make(void)
     if (vertices.buf)
         return 0;
     uniform_slot_size = (sizeof(PicaFragmentUniforms) + min_ubo_align - 1) / min_ubo_align * min_ubo_align;
-    return make_buffer(&vertices, VERTEX_RING, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ||
+    return make_buffer(&vertices, VERTEX_RING, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) ||
            make_buffer(&uniforms, uniform_slot_size * UNIFORM_SLOTS, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) ||
            make_buffer(&luts, (VkDeviceSize)LUT_BYTES * LUT_SLOTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 }
@@ -665,8 +706,13 @@ void vk_renderer_draw(PicaState* s, int indexed)
     drawing_target = t;
     if (t < 0) { vk_skips[0]++; return; }
     targets[t].depth_address = BITS(r[0x11C], 0, 28) * 8;
-    const long n = indexed == 2 ? pica_vertex_immediate(s, triangles, 1 << 18) : pica_vertex_draw(s, indexed, triangles, 1 << 18);
-    if (n <= 0) { if (indexed != 2) vk_skips[n < 0 ? 1 : 2]++; return; } /* (an immediate vertex completing no triangle: none to draw) */
+    /* the vertices: made on the GPU (VulkanVertexShader.c, recorded below once the rings have room), or here */
+    const int gpu = vk_vertex_handles(s, indexed);
+    long n = 0;
+    if (!gpu) {
+        n = indexed == 2 ? pica_vertex_immediate(s, triangles, 1 << 18) : pica_vertex_draw(s, indexed, triangles, 1 << 18);
+        if (n <= 0) { if (indexed != 2) vk_skips[n < 0 ? 1 : 2]++; return; } /* (an immediate vertex completing no triangle: none to draw) */
+    }
     static char frag[1 << 17];
     if (getenv("HOS_RENDER_LOOSE") && strstr(getenv("HOS_RENDER_LOOSE"), "alpha"))
         pica_fragment_no_alpha_test = 1;
@@ -677,15 +723,49 @@ void vk_renderer_draw(PicaState* s, int indexed)
     if (!p) { vk_skips[3]++; return; }
     if (rings_make())
         return;
+    /* the texture units' images, or the first render target's colour as a stand-in for a unit that has none (before
+       the vertices are placed: a texture may need the recorded work submitted, which frees the rings) */
+    static const uint32_t addr_reg[3] = {0x085, 0x095, 0x09D}, dim_reg[3] = {0x082, 0x092, 0x09A},
+                          param_reg[3] = {0x083, 0x093, 0x09B}, fmt_reg[3] = {0x08E, 0x096, 0x09E};
+    VkDescriptorImageInfo images[3];
+    for (int u = 0; u < 3; u++) {
+        VkImageView v = VK_NULL_HANDLE;
+        if (r[0x080] >> u & 1)
+            v = texture_view(s, BITS(r[addr_reg[u]], 0, 28) * 8, BITS(r[dim_reg[u]], 16, 11), BITS(r[dim_reg[u]], 0, 11),
+                             r[fmt_reg[u]] & 0xF);
+        if (!v) {
+            if (r[0x080] >> u & 1) vk_skips[4]++;
+            v = targets[0].color.view;
+        }
+        images[u] = (VkDescriptorImageInfo){sampler_for(r[param_reg[u]]), v, VK_IMAGE_LAYOUT_GENERAL};
+    }
+    /* every ring checked before any is written: a flush frees them all (the GPU's vertices: room for the most a draw
+       makes, as their count is known only once recorded) */
+    const VkDeviceSize vbytes = (VkDeviceSize)(gpu ? 1 << 18 : n) * sizeof(PicaVertex);
+    if (vertex_used + vbytes > VERTEX_RING || uniform_used == UNIFORM_SLOTS || sets_used == SETS || lut_used == LUT_SLOTS)
+        flush();
+    const VkDeviceSize voffset = vertex_used;
+    if (gpu) {
+        record_compute();
+        n = vk_vertex_record(s, indexed, ccmd, vertices.buf, voffset, 1 << 18);
+        if (n == VK_VERTEX_FULL) { /* (the module's own rings: the work so far submitted, the draw made again) */
+            flush();
+            record_compute();
+            n = vk_vertex_record(s, indexed, ccmd, vertices.buf, vertex_used, 1 << 18);
+        }
+        if (n == VK_VERTEX_CPU || n == VK_VERTEX_FULL)
+            n = pica_vertex_draw(s, indexed, triangles, 1 << 18);
+        else if (n <= 0) { vk_skips[n < 0 ? 1 : 2]++; return; }
+        else goto placed;
+        if (n <= 0) { vk_skips[n < 0 ? 1 : 2]++; return; }
+    }
     if (!BITS(r[0x11E], 24, 1)) /* flipped (Azahar's trivial vertex shader: vtx_pos.y = -vtx_pos.y) */
         for (long k = 0; k < n; k++)
             triangles[k].position[1] = -triangles[k].position[1];
-    const VkDeviceSize vbytes = (VkDeviceSize)n * sizeof(PicaVertex);
-    if (vertex_used + vbytes > VERTEX_RING || uniform_used == UNIFORM_SLOTS || sets_used == SETS || lut_used == LUT_SLOTS)
-        flush(); /* (every ring checked before any is written: a flush frees them all) */
-    const VkDeviceSize voffset = vertex_used;
-    memcpy((uint8_t*)vertices.map + voffset, triangles, (size_t)vbytes);
-    vertex_used += (vbytes + 15) & ~(VkDeviceSize)15;
+    memcpy((uint8_t*)vertices.map + vertex_used, triangles, (size_t)n * sizeof(PicaVertex));
+placed:;
+    const VkDeviceSize vplaced = vertex_used; /* (voffset, or 0 after the flush above) */
+    vertex_used += ((VkDeviceSize)n * sizeof(PicaVertex) + 15) & ~(VkDeviceSize)15;
     const VkDeviceSize uoffset = uniform_slot_size * (VkDeviceSize)uniform_used++;
     PicaFragmentUniforms* const fu = (PicaFragmentUniforms*)((uint8_t*)uniforms.map + uoffset);
     pica_fragment_uniforms(s, fu);
@@ -701,21 +781,6 @@ void vk_renderer_draw(PicaState* s, int indexed)
         memcpy((uint8_t*)luts.map + (VkDeviceSize)LUT_BYTES * lslot, lut_now, LUT_BYTES);
     }
     const VkDeviceSize uoff_final = uoffset;
-    /* the texture units' images, or the first render target's colour as a stand-in for a unit that has none */
-    static const uint32_t addr_reg[3] = {0x085, 0x095, 0x09D}, dim_reg[3] = {0x082, 0x092, 0x09A},
-                          param_reg[3] = {0x083, 0x093, 0x09B}, fmt_reg[3] = {0x08E, 0x096, 0x09E};
-    VkDescriptorImageInfo images[3];
-    for (int u = 0; u < 3; u++) {
-        VkImageView v = VK_NULL_HANDLE;
-        if (r[0x080] >> u & 1)
-            v = texture_view(s, BITS(r[addr_reg[u]], 0, 28) * 8, BITS(r[dim_reg[u]], 16, 11), BITS(r[dim_reg[u]], 0, 11),
-                             r[fmt_reg[u]] & 0xF);
-        if (!v) {
-            if (r[0x080] >> u & 1) vk_skips[4]++;
-            v = targets[0].color.view;
-        }
-        images[u] = (VkDescriptorImageInfo){sampler_for(r[param_reg[u]]), v, VK_IMAGE_LAYOUT_GENERAL};
-    }
     VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, NULL, desc_pool, 1, &set_layout};
     VkDescriptorSet set;
     VK(vkAllocateDescriptorSets(dev, &dai, &set));
@@ -748,7 +813,7 @@ void vk_renderer_draw(PicaState* s, int indexed)
     VkRect2D scissor = {{0, 0}, {width, height}};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdSetBlendConstants(cmd, ((const PicaFragmentUniforms*)((uint8_t*)uniforms.map + uoff_final))->blend_color);
-    vkCmdBindVertexBuffers(cmd, 0, 1, &vertices.buf, &voffset);
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertices.buf, &vplaced);
     vkCmdDraw(cmd, (uint32_t)n, 1, 0, 0);
 }
 

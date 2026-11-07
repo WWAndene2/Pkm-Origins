@@ -245,49 +245,88 @@ long pica_vertex_immediate(PicaState* s, PicaVertex* out, long max)
     return assembler.written;
 }
 
-long pica_vertex_draw(PicaState* s, int indexed, PicaVertex* out, long max)
+int pica_loader_setup(PicaState* s, int indexed, PicaLoader* l)
 {
     const uint32_t* r = s->reg;
-    const uint32_t base = BITS(r[0x200], 1, 28) * 16;
+    memset(l, 0, sizeof *l);
+    l->base = BITS(r[0x200], 1, 28) * 16;
     const uint32_t f0 = r[0x201], f1 = r[0x202];
-    const uint32_t total = BITS(f1, 28, 4) + 1, mask = BITS(f1, 16, 12);
+    l->total = BITS(f1, 28, 4) + 1;
+    l->mask = BITS(f1, 16, 12);
     /* each attribute's source: offset from the base, stride, format, element count (VertexLoader's constructor) */
-    uint32_t src[12] = {0}, stride[12] = {0}, format[12] = {0}, elements[12] = {0};
     for (int a = 0; a < 12; a++) {
         const uint32_t word = a < 8 ? f0 >> (4 * a) : f1 >> (4 * (a - 8));
-        format[a] = word & 3;
+        l->format[a] = word & 3;
     }
-    for (int l = 0; l < 12; l++) {
-        const uint32_t* L = r + 0x203 + 3 * l;
+    for (int k = 0; k < 12; k++) {
+        const uint32_t* L = r + 0x203 + 3 * k;
         const uint32_t count = BITS(L[2], 28, 4), byte_count = BITS(L[2], 16, 8);
         uint32_t offset = 0;
         for (uint32_t c = 0; c < count && c < 12; c++) {
             const uint32_t id = c < 8 ? BITS(L[1], 4 * c, 4) : BITS(L[2], 4 * (c - 8), 4);
             if (id < 12) {
-                const uint32_t esize = format[id] == 3 ? 4 : format[id] == 2 ? 2 : 1;
+                const uint32_t esize = l->format[id] == 3 ? 4 : l->format[id] == 2 ? 2 : 1;
                 const uint32_t n = (id < 8 ? BITS(f0, 4 * id + 2, 2) : BITS(f1, 4 * (id - 8) + 2, 2)) + 1;
                 offset = (offset + esize - 1) / esize * esize;
-                src[id] = BITS(L[0], 0, 28) + offset;
-                stride[id] = byte_count;
-                elements[id] = n;
+                l->src[id] = BITS(L[0], 0, 28) + offset;
+                l->stride[id] = byte_count;
+                l->elements[id] = n;
                 offset += n * esize;
             } else {
                 offset = (offset + 3) / 4 * 4 + (id - 11) * 4;
             }
         }
     }
-    const uint32_t count = r[0x228];
+    l->count = r[0x228];
+    l->first = r[0x22A];
     const uint32_t index_word = r[0x227];
-    const int index16 = index_word >> 31 & 1;
-    const uint8_t* indices = indexed ? bytes(s, base + BITS(index_word, 0, 28), count * (index16 ? 2 : 1)) : NULL;
-    if (indexed && !indices)
-        return -1;
+    l->index16 = index_word >> 31 & 1;
+    l->indices = indexed ? bytes(s, l->base + BITS(index_word, 0, 28), l->count * (l->index16 ? 2 : 1)) : NULL;
+    return indexed && !l->indices ? -1 : 0;
+}
 
-    /* the vertex shader's inputs and outputs (regs_shader.h at 0x2B0) */
-    const uint32_t max_input = BITS(r[0x2B9], 0, 4);
-    const uint64_t input_map = (uint64_t)r[0x2BC] << 32 | r[0x2BB];
-    const uint32_t output_mask = r[0x2BD] & 0xFFFF, entry = r[0x2BA] & 0xFFFF;
-    const uint32_t outputs = BITS(r[0x04F], 0, 3);
+uint32_t pica_loader_vertex(const PicaLoader* l, uint32_t i)
+{
+    if (!l->indices)
+        return i + l->first;
+    return l->index16 ? (uint32_t)(l->indices[2 * i] | l->indices[2 * i + 1] << 8) : l->indices[i];
+}
+
+int pica_loader_read(PicaState* s, const PicaLoader* l, uint32_t vertex, float input[16][4])
+{
+    memset(input, 0, 16 * sizeof input[0]);
+    for (uint32_t a = 0; a < l->total && a < 16; a++) {
+        if (a >= 12 || (l->mask >> a & 1)) {
+            memcpy(input[a], s->default_attribute[a], sizeof input[a]);
+            continue;
+        }
+        if (!l->elements[a])
+            continue;
+        const uint32_t esize = l->format[a] == 3 ? 4 : l->format[a] == 2 ? 2 : 1;
+        const uint8_t* p = bytes(s, l->base + l->src[a] + l->stride[a] * vertex, l->elements[a] * esize);
+        if (!p)
+            return -1;
+        for (uint32_t c = 0; c < l->elements[a]; c++) {
+            switch (l->format[a]) {
+            case 0: input[a][c] = (float)(int8_t)p[c]; break;
+            case 1: input[a][c] = (float)p[c]; break;
+            case 2: { int16_t h; memcpy(&h, p + 2 * c, 2); input[a][c] = (float)h; break; }
+            default: memcpy(&input[a][c], p + 4 * c, 4); break;
+            }
+        }
+        for (uint32_t c = l->elements[a]; c < 4; c++)
+            input[a][c] = c == 3 ? 1.0f : 0.0f;
+    }
+    return 0;
+}
+
+long pica_vertex_draw(PicaState* s, int indexed, PicaVertex* out, long max)
+{
+    const uint32_t* r = s->reg;
+    PicaLoader loader;
+    if (pica_loader_setup(s, indexed, &loader))
+        return -1;
+    const uint32_t count = loader.count;
 
     struct { int valid; uint32_t id; float attr[16][4]; } cache[64];
     memset(cache, 0, sizeof cache);
@@ -299,9 +338,7 @@ long pica_vertex_draw(PicaState* s, int indexed, PicaVertex* out, long max)
     emit_target.assembler = &assembler;
 
     for (uint32_t i = 0; i < count; i++) {
-        uint32_t vertex = i + r[0x22A];
-        if (indexed)
-            vertex = index16 ? (uint32_t)(indices[2 * i] | indices[2 * i + 1] << 8) : indices[i];
+        const uint32_t vertex = pica_loader_vertex(&loader, i);
         if (indexed && gs.on && gs.mode == 1 && gs.need_index) {
             gs_index(s, &gs, vertex);
             continue;
@@ -313,29 +350,8 @@ long pica_vertex_draw(PicaState* s, int indexed, PicaVertex* out, long max)
                 if (cache[k].valid && cache[k].id == vertex) { memcpy(attr, cache[k].attr, sizeof attr); hit = 1; break; }
         if (!hit) {
             float input[16][4];
-            memset(input, 0, sizeof input);
-            for (uint32_t a = 0; a < total && a < 16; a++) {
-                if (a >= 12 || (mask >> a & 1)) {
-                    memcpy(input[a], s->default_attribute[a], sizeof input[a]);
-                    continue;
-                }
-                if (!elements[a])
-                    continue;
-                const uint32_t esize = format[a] == 3 ? 4 : format[a] == 2 ? 2 : 1;
-                const uint8_t* p = bytes(s, base + src[a] + stride[a] * vertex, elements[a] * esize);
-                if (!p)
-                    return -1;
-                for (uint32_t c = 0; c < elements[a]; c++) {
-                    switch (format[a]) {
-                    case 0: input[a][c] = (float)(int8_t)p[c]; break;
-                    case 1: input[a][c] = (float)p[c]; break;
-                    case 2: { int16_t h; memcpy(&h, p + 2 * c, 2); input[a][c] = (float)h; break; }
-                    default: memcpy(&input[a][c], p + 4 * c, 4); break;
-                    }
-                }
-                for (uint32_t c = elements[a]; c < 4; c++)
-                    input[a][c] = c == 3 ? 1.0f : 0.0f;
-            }
+            if (pica_loader_read(s, &loader, vertex, input))
+                return -1;
             run_vertex_shader(s, (const float (*)[4])input, attr);
             if (indexed) {
                 cache[cache_pos].valid = 1;
