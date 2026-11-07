@@ -692,6 +692,28 @@ static int rings_make(void)
            make_buffer(&uniforms, uniform_slot_size * UNIFORM_SLOTS, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) ||
            make_buffer(&luts, (VkDeviceSize)LUT_BYTES * LUT_SLOTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 }
+/* A render target's colour read back (RGBA8, rows as the image's), once: the copy kept until a draw or a fill may
+ * change a target. A display transfer reads its target twice, for the memory (target_to_memory) and for the frame
+ * written out (vk_renderer_display); each read was a copy, a submission and a wait (7 November: the GPU thread's
+ * largest share on the field, sample_stacks.py). */
+static Buffer readback;
+static int readback_target = -1;
+
+static const uint8_t* read_target(int k)
+{
+    if (readback_target == k)
+        return readback.map;
+    if (!readback.buf && make_buffer(&readback, 1024 * 1024 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT))
+        return NULL;
+    outside_pass();
+    VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
+                              {targets[k].width, targets[k].height, 1}};
+    vkCmdCopyImageToBuffer(cmd, targets[k].color.image, VK_IMAGE_LAYOUT_GENERAL, readback.buf, 1, &copy);
+    flush(); /* (the work so far submitted and waited for) */
+    readback_target = k;
+    return readback.map;
+}
+
 unsigned long long vk_skips[8]; /* draws not drawn, by reason (renderer_report prints them) */
 static PicaVertex triangles[1 << 18];
 
@@ -706,6 +728,7 @@ void vk_renderer_draw(PicaState* s, int indexed)
     drawing_target = t;
     if (t < 0) { vk_skips[0]++; return; }
     targets[t].depth_address = BITS(r[0x11C], 0, 28) * 8;
+    readback_target = -1; /* (this draw changes a target: read_target's copy is old) */
     targets[t].format = BITS(r[0x117], 16, 3); /* (its colour format in memory: vk_renderer_flush) */
     /* the vertices: made on the GPU (VulkanVertexShader.c, recorded below once the rings have room), or here */
     const int gpu = vk_vertex_handles(s, indexed);
@@ -828,27 +851,19 @@ void vk_renderer_display(uint32_t source)
             source >= targets[k].address + targets[k].width * targets[k].height * 4)
             continue;
         const uint32_t w = targets[k].width, h = targets[k].height;
-        Buffer out;
-        if (make_buffer(&out, (VkDeviceSize)w * h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT))
+        const uint8_t* const px = read_target(k); /* (the frame's work submitted, its image read back) */
+        if (!px)
             return;
-        outside_pass();
-        VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
-        vkCmdCopyImageToBuffer(cmd, targets[k].color.image, VK_IMAGE_LAYOUT_GENERAL, out.buf, 1, &copy);
-        flush(); /* (the frame's work submitted and waited for: its image is read back) */
         char path[700];
         snprintf(path, sizeof path, "%s/frame_%04u_%08X.ppm", dir, frame_count++, source);
         FILE* f = fopen(path, "wb");
         if (f) {
             fprintf(f, "P6\n%u %u\n255\n", w, h);
-            const uint8_t* px = out.map;
             for (uint32_t y = 0; y < h; y++) /* (the PICA's framebuffer rows go up: written top row first) */
                 for (uint32_t x = 0; x < w; x++)
                     fwrite(px + ((size_t)(h - 1 - y) * w + x) * 4, 1, 3, f);
             fclose(f);
         }
-        vkUnmapMemory(dev, out.mem);
-        vkDestroyBuffer(dev, out.buf, NULL);
-        vkFreeMemory(dev, out.mem, NULL);
         return;
     }
     static int told;
@@ -875,6 +890,7 @@ void vk_renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t wid
         if (!color && !depth)
             continue;
         outside_pass();
+        readback_target = -1;
         if (color) { /* an RGBA8 pixel in memory: A B G R, the fill value R G B A from its high byte */
             VkClearColorValue c = {{(float)(value >> 24 & 0xFF) / 255.0f, (float)(value >> 16 & 0xFF) / 255.0f,
                                     (float)(value >> 8 & 0xFF) / 255.0f, (float)(value & 0xFF) / 255.0f}};
@@ -903,16 +919,11 @@ static void target_to_memory(int k, uint8_t* (*host)(uint32_t physical, uint32_t
     uint8_t* const mem = host(targets[k].address, w * h * b);
     if (!mem)
         return;
-    static Buffer back;
-    if (!back.buf && make_buffer(&back, 1024 * 1024 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT))
+    const uint8_t* const px = read_target(k);
+    if (!px)
         return;
-    outside_pass();
-    VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
-    vkCmdCopyImageToBuffer(cmd, targets[k].color.image, VK_IMAGE_LAYOUT_GENERAL, back.buf, 1, &copy);
-    flush();
     static const uint32_t xlut[8] = {0x00, 0x01, 0x04, 0x05, 0x10, 0x11, 0x14, 0x15};
     static const uint32_t ylut[8] = {0x00, 0x02, 0x08, 0x0a, 0x20, 0x22, 0x28, 0x2a};
-    const uint8_t* px = back.map;
     for (uint32_t y = 0; y < h; y++)
         for (uint32_t x = 0; x < w; x++) {
             const uint8_t* c = px + ((size_t)(h - 1 - y) * w + x) * 4; /* R G B A */
