@@ -23,7 +23,7 @@ if [ $translate = 1 ]; then
         { tail -5 "$S/build_oras_mod.log"; exit 1; }
     head -2 "$S/build_oras_mod.log"
 fi
-cc -std=c11 -D_GNU_SOURCE -O2 -w -DHOS_GPU_TRACE -I src/hos -o "$S/build_oras_mod/game" $(find src -name "*.c") \
+cc -std=c11 -D_GNU_SOURCE -O2 -w -DHOS_GPU_TRACE -I src/hos -o "$S/build_oras_mod/game" $(find src -name "*.c" -not -path "src/platform/android/*") \
     "$S/build_oras_mod/libgame_code.a" -lm -lpthread -lvulkan || exit 1
 rm -rf "$S/run"; mkdir -p "$S/run"
 cd "$S"
