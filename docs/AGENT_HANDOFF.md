@@ -16,13 +16,16 @@ what is done, §11 for the renderer). This file says where things stand and what
 - **Renderer (`src/platform/`):** Vulkan, headless, frames to PPM. The opening matches Azahar's shots (29 of 36 within
   2.5 / 255). One submission a frame (6 November); the vertex shaders on the GPU (7 November, `VulkanVertexShader.c`,
   +18 % on lavapipe; `HOS_VERTEX_CPU=1` for the CPU path), immediate mode and the geometry shader still on the CPU.
-  The immediate mode (the title movie) is done.
+  The GPU's commands on a thread of their own (`Gsp.c`, +23 %); display transfers and memory fills done in memory as
+  Azahar's, render targets written back first (one readback for the memory and the frame).
 - **X:** translates and compiles (7 November: 11 stubs), but stops at its first frame with the owner's X save (fault 9
   at 0049D57C); Azahar boots the same save to its title. Not looked into (owner, 7 November: not now).
-- **Where the game gets (6 November, end of session):** the opening, the title movie and the title screen
-  ("POKÉMON RUBIS OMÉGA / APPUYEZ SUR START"), with the owner's save. The last two fixes: a thread ending releases the
-  mutexes it holds (the main thread waited for ever behind one), and the GPU's immediate mode (the movie is drawn
-  with it). Not yet compared frame by frame with Azahar past the opening.
+- **Where the game gets (7 November, end of session):** past the title to **the field** (Littleroot, the player by
+  the houses), with the owner's field save and scripted START / A (`tools/field_run.sh`). The field's picture matches
+  Azahar's shot taken at the same time of day within 1.5 / 255 (`tools/field_compare.py`). Pomegrade's
+  `main_Startpoint` save also reaches the field, but its top screen stays black there, in Azahar too.
+- **The owner's field save** (uploaded 7 November) is only in that session's scratch space: ask the owner to put it
+  on Drive, then add it to the setup below (`work/oras/save/main`).
 
 ## How to work (the loop)
 
@@ -63,6 +66,9 @@ runner.
 | A thread dump of a running game | `kill -USR1 <pid>` (or `$HOS_DUMP_AFTER=<seconds>`) |
 | The renderer's speed | `tools/render_bench.sh $S <seconds> [binary]` (top-screen frames from the start; compare builds) |
 | Where the time goes | `tools/sample_stacks.py <pid>` (gdb samples of every thread's stack: no perf here) |
+| To the field, frames written | `tools/field_run.sh $S <out> [seconds] [binary]` (the save in `work/oras/save/main`) |
+| The field against Azahar | `tools/field_compare.py <out> <Azahar's shot> --out sheet.png` (shot taken at the same time: the light follows the clock) |
+| What the draws ask (fog, formats, targets...) | `$HOS_DRAW_STATS=<file>` on a run without `$HOS_RENDER_DIR` (written every 5 s) |
 
 Lessons that cost time, so they are not paid twice:
 
@@ -106,12 +112,18 @@ with `render_bench.sh` and checked against Azahar's shots).
    November, kept in the scratch space as `work/dumps/save/main_owner`, not on Drive yet): `HOS_INPUT` with START at
    110 s then A every 6 s; matched against Azahar's shot taken at the same wall-clock time within 1.5 / 255 (the
    game's lighting follows the real clock: shots of different times differ by tens of points).
-5. **A window on PC, then Android** (the owner's phone: Mali).
+   Speed, end of 7 November: on the field the GPU thread waits on lavapipe (the pixels drawn on the CPU), the game's
+   code barely shows; what is left to optimise (vertex attributes read on the GPU, pipelines made ahead) cannot be
+   measured here. The owner agreed (7 November): the window and Android next, speed measured there.
+5. **A window on PC, then Android** (the owner's phone: Mali): **the next step.** Check there that the device has
+   `shaderSignedZeroInfNanPreserveFloat32` (the shader translation's exactness, PicaShaderGlsl.h).
 6. Then the coverage of what the game uses (services, GPU features: from call counts at many moments) and mass
    comparisons with Azahar (saves at many places, scripted input), with a blame by elimination when a scene differs.
    The title movie and title screen are not yet compared frame by frame.
 
 ## Open with the owner
 
-- Nothing. (The `item` command pushed to Pomegrade by mistake, commit `31f59fe0` on its branch `ccr-700c70f5-5dwhza`, is
+- The owner's field save to put on Drive (above).
+- Seen twice, not looked into: a run that did not end on SIGINT (`timeout -s INT`); use `-s KILL` meanwhile.
+- (The `item` command pushed to Pomegrade by mistake, commit `31f59fe0` on its branch `ccr-700c70f5-5dwhza`, is
   now `tools/oras_save_items.py` here; the owner asked to keep that Pomegrade branch: do not delete it.)

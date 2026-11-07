@@ -534,6 +534,14 @@ Performance comes first in every design choice, the more so for the seamless co-
    not bit-equal (from the title movie on) are the GPU's rcp / rsq / ex2 / lg2, the same count with the switch form.
    Not yet compared with Azahar's shots. The profile now: the render thread waits on lavapipe's work and the frames
    written to disk; a game thread spins in `hos_arbitrate` (f_0015EB4C).
+   **The GPU on its own thread, the field reached (7 November).** The GSP's commands run in order on a thread of their
+   own, each interrupt raised when done (+23 %); interrupts and VBlanks written through `hos_defer`, since the
+   translated strex overwrote another host thread's write between ldrex and strex (lost interrupts, the game stopped
+   presenting frames). The build without the GPU trace: no gain here (the renderer bounds the rate). With the owner's
+   field save and scripted START / A, the game reaches the field; its draws use fog (mode 5), the geometry shader,
+   projected textures and a second render target. Display transfers and memory fills now act on memory as Azahar's
+   SwBlitter (a render target written back first: Morton tiles, its colour format). The field matches Azahar's shot
+   at the same time of day within 1.5 / 255. Fog: set by the game, no visible effect found yet; not done.
 
 ## 11. The renderer's architecture (step 4; owner's request, 5 November. Built since, first form: src/platform/Pica*.c and VulkanRenderer.c, the opening rendered as Azahar's, §10; not yet fast)
 
