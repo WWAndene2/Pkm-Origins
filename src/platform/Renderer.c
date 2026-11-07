@@ -16,7 +16,7 @@ extern uint8_t* hos_memory;
 
 static PicaState state;
 static int ready;
-static FILE* stats;
+static const char* stats; /* $HOS_DRAW_STATS: the census's file, written again at each report */
 
 /* the GPU's physical addresses in the game's view: FCRAM 0x20000000 at the linear heap's 0x14000000, VRAM 0x18000000
    at 0x1F000000 (src/hos/Loader.c maps both) */
@@ -152,7 +152,7 @@ void renderer_submit_list(uint32_t address, uint32_t size)
         const char* path = getenv("HOS_DRAW_STATS");
         if (!path && !getenv("HOS_FRAGMENT_DIR") && !getenv("HOS_RENDER_DIR"))
             return;
-        stats = path ? fopen(path, "w") : NULL;
+        stats = path;
         pica_state_init(&state, on_draw, physical, NULL);
         ready = 1;
     }
@@ -168,11 +168,16 @@ void renderer_report(void)
     fprintf(stderr, "renderer: textures decoded again (their bytes changed) %llu, read inside a render target %llu\n", vk_texture_reloads, vk_texture_in_target);
     if (!stats)
         return;
-    fprintf(stats, "# draws %llu, triangles %llu; vertices %llu, of them finite %llu, inside the screen %llu\n"
+    /* (the report comes every 5 s, hos_gsp_report: the file written afresh each time; it was closed at the first and
+       freed again at the second, 7 November) */
+    FILE* out = fopen(stats, "w");
+    if (!out)
+        return;
+    fprintf(out, "# draws %llu, triangles %llu; vertices %llu, of them finite %llu, inside the screen %llu\n"
                    "# feature\tdraws\n", draws, triangles, all_vertices, finite_vertices, inside_vertices);
     for (int k = 0; k < KEYS && census[k].key[0]; k++)
-        fprintf(stats, "%s\t%llu\n", census[k].key, census[k].draws);
-    fclose(stats);
+        fprintf(out, "%s\t%llu\n", census[k].key, census[k].draws);
+    fclose(out);
 }
 
 static uint32_t to_physical(uint32_t va)
