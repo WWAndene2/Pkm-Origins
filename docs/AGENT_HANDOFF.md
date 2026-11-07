@@ -99,7 +99,13 @@ with `render_bench.sh` and checked against Azahar's shots).
    `-DHOS_GPU_TRACE`; alternated, 120 s each: trace 2,336 / 2,430, none 2,455 / 2,398 top-screen frames: within the
    runs' spread, about 2 %). On lavapipe the frames are bound by the renderer, not the game's code; the trace build
    stays the default of `build_and_run.sh` (the analysis tools need it). To measure again on a real GPU.
-4. **Fog**, then **a render target written back to memory** when the game reads it as memory.
+4. **Fog** (not done: the field's draws set fog mode 5 on about 12,000 draws, no visible effect found yet on the one
+   field picture compared), then ~~a render target written back to memory~~ (done 7 November: display transfers
+   copy memory to memory as Azahar's SwBlitter, the render target holding the input written into memory first, GSP's
+   memory fills written into memory; -3.5 % on lavapipe). The field is reached with the owner's save (uploaded 7
+   November, kept in the scratch space as `work/dumps/save/main_owner`, not on Drive yet): `HOS_INPUT` with START at
+   110 s then A every 6 s; matched against Azahar's shot taken at the same wall-clock time within 1.5 / 255 (the
+   game's lighting follows the real clock: shots of different times differ by tens of points).
 5. **A window on PC, then Android** (the owner's phone: Mali).
 6. Then the coverage of what the game uses (services, GPU features: from call counts at many moments) and mass
    comparisons with Azahar (saves at many places, scripted input), with a blame by elimination when a scene differs.

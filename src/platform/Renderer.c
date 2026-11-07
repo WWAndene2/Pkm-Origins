@@ -198,6 +198,17 @@ void renderer_copied(uint32_t start, uint32_t bytes)
         vk_renderer_copied(to_physical(start), bytes);
 }
 
+static uint8_t* host_physical(uint32_t address, uint32_t bytes)
+{
+    return (uint8_t*)physical(address, bytes, NULL);
+}
+
+void renderer_flush(uint32_t start, uint32_t bytes)
+{
+    if (ready)
+        vk_renderer_flush(to_physical(start), bytes, host_physical);
+}
+
 void renderer_display(uint32_t source)
 {
     /* the game's virtual address as the GPU's physical one: VRAM 0x1F000000 -> 0x18000000, linear heap 0x14000000 ->

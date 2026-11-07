@@ -22,6 +22,10 @@ void renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t width_
 /* the game's memory written by a copy of the GSP (a texture copy): from start, bytes long (game addresses) */
 void renderer_copied(uint32_t start, uint32_t bytes);
 
+/* the GPU's work on game memory start-start + bytes (game addresses) written into that memory before something reads it
+   (a display transfer: Azahar's FlushRegion) */
+void renderer_flush(uint32_t start, uint32_t bytes);
+
 /* at exit: the census, if asked */
 void renderer_report(void);
 

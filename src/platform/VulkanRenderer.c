@@ -326,7 +326,7 @@ int vk_renderer_init(void)
 
 /* render targets, by the colour buffer's physical address */
 enum { TARGETS = 16 };
-static struct { uint32_t address, width, height, depth_address; Image color, depth; VkFramebuffer fb; int used; } targets[TARGETS];
+static struct { uint32_t address, width, height, depth_address, format; Image color, depth; VkFramebuffer fb; int used; } targets[TARGETS];
 
 static int target_for(uint32_t address, uint32_t width, uint32_t height)
 {
@@ -706,6 +706,7 @@ void vk_renderer_draw(PicaState* s, int indexed)
     drawing_target = t;
     if (t < 0) { vk_skips[0]++; return; }
     targets[t].depth_address = BITS(r[0x11C], 0, 28) * 8;
+    targets[t].format = BITS(r[0x117], 16, 3); /* (its colour format in memory: vk_renderer_flush) */
     /* the vertices: made on the GPU (VulkanVertexShader.c, recorded below once the rings have room), or here */
     const int gpu = vk_vertex_handles(s, indexed);
     long n = 0;
@@ -888,6 +889,56 @@ void vk_renderer_fill(uint32_t start, uint32_t end, uint32_t value, uint32_t wid
             vkCmdClearDepthStencilImage(cmd, targets[k].depth.image, VK_IMAGE_LAYOUT_GENERAL, &ds, 1, &dr);
         }
     }
+}
+
+/* A render target's colour written into the game's memory as the PICA lays it out (Azahar's rasterizer cache
+ * FlushRegion, before a display transfer reads it: docs/RECOMPILATION_PLAN.md, next step 4): 8 x 8 tiles in Morton
+ * order (VideoCore::GetMortonOffset), the target's colour format (regs_framebuffer.h's ColorFormat: RGBA8, RGB8,
+ * RGB5A1, RGB565, RGBA4; Common::Color's Encode*), memory row y the image's row height - 1 - y (the image's rows run
+ * opposite to memory's, as the textures' do: texture_upload). */
+static void target_to_memory(int k, uint8_t* (*host)(uint32_t physical, uint32_t bytes))
+{
+    static const uint32_t bpp[8] = {4, 3, 2, 2, 2, 4, 4, 4};
+    const uint32_t w = targets[k].width, h = targets[k].height, b = bpp[targets[k].format & 7];
+    uint8_t* const mem = host(targets[k].address, w * h * b);
+    if (!mem)
+        return;
+    static Buffer back;
+    if (!back.buf && make_buffer(&back, 1024 * 1024 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT))
+        return;
+    outside_pass();
+    VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
+    vkCmdCopyImageToBuffer(cmd, targets[k].color.image, VK_IMAGE_LAYOUT_GENERAL, back.buf, 1, &copy);
+    flush();
+    static const uint32_t xlut[8] = {0x00, 0x01, 0x04, 0x05, 0x10, 0x11, 0x14, 0x15};
+    static const uint32_t ylut[8] = {0x00, 0x02, 0x08, 0x0a, 0x20, 0x22, 0x28, 0x2a};
+    const uint8_t* px = back.map;
+    for (uint32_t y = 0; y < h; y++)
+        for (uint32_t x = 0; x < w; x++) {
+            const uint8_t* c = px + ((size_t)(h - 1 - y) * w + x) * 4; /* R G B A */
+            uint8_t* d = mem + (xlut[x % 8] + ylut[y % 8] + (x & ~7u) * 8) * b + (y & ~7u) * w * b;
+            uint16_t v;
+            switch (targets[k].format & 7) {
+            case 0: d[0] = c[3]; d[1] = c[2]; d[2] = c[1]; d[3] = c[0]; continue; /* RGBA8 */
+            case 1: d[0] = c[2]; d[1] = c[1]; d[2] = c[0]; continue;               /* RGB8 */
+            case 2: v = (uint16_t)((c[0] >> 3) << 11 | (c[1] >> 3) << 6 | (c[2] >> 3) << 1 | c[3] >> 7); break; /* RGB5A1 */
+            case 3: v = (uint16_t)((c[0] >> 3) << 11 | (c[1] >> 2) << 5 | c[2] >> 3); break;                   /* RGB565 */
+            case 4: v = (uint16_t)((c[0] >> 4) << 12 | (c[1] >> 4) << 8 | (c[2] >> 4) << 4 | c[3] >> 4); break; /* RGBA4 */
+            default: continue;
+            }
+            memcpy(d, &v, 2);
+        }
+}
+
+void vk_renderer_flush(uint32_t address, uint32_t bytes, uint8_t* (*host)(uint32_t physical, uint32_t bytes))
+{
+    if (ready != 0)
+        return;
+    static const uint32_t bpp[8] = {4, 3, 2, 2, 2, 4, 4, 4};
+    for (int k = 0; k < TARGETS; k++)
+        if (targets[k].used && address < targets[k].address + targets[k].width * targets[k].height * bpp[targets[k].format & 7] &&
+            targets[k].address < address + bytes)
+            target_to_memory(k, host);
 }
 
 unsigned long long vk_copies_into_target;
