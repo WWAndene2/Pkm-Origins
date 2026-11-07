@@ -95,8 +95,10 @@ with `render_bench.sh` and checked against Azahar's shots).
    are written through `hos_defer` (Kernel.h): written from another host thread while the game ran, they were lost
    to its ldrex / strex (the game stopped presenting frames in 2 runs of 7). 6 runs of 120 s after the fix: none
    stopped. Seen once before the fix and not looked into: a run that did not end on SIGINT.
-3. **A build without the GPU trace** (`build_game.py` without `--gpu-trace`) for the speed of the game code itself;
-   the trace instruments every store.
+3. ~~A build without the GPU trace~~ (measured 7 November: `build_game.py` without `--gpu-trace`, the runtime without
+   `-DHOS_GPU_TRACE`; alternated, 120 s each: trace 2,336 / 2,430, none 2,455 / 2,398 top-screen frames: within the
+   runs' spread, about 2 %). On lavapipe the frames are bound by the renderer, not the game's code; the trace build
+   stays the default of `build_and_run.sh` (the analysis tools need it). To measure again on a real GPU.
 4. **Fog**, then **a render target written back to memory** when the game reads it as memory.
 5. **A window on PC, then Android** (the owner's phone: Mali).
 6. Then the coverage of what the game uses (services, GPU features: from call counts at many moments) and mass
