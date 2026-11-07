@@ -39,15 +39,11 @@ repository.
    `POMEGRADE_ORAS_DRIVE_ID` / `POMEGRADE_X_DRIVE_ID` set to the ids of the .3ds files in the owner's Drive folder
    "Pokemon Project - Radiant Platinum" (find them with the Drive connector). No Omega Ruby save is on Drive: the
    setup uses Pomegrade's `headless/saves/main_Startpoint`. X's save is the Drive file "Pkm XY save - main".
-3. `tools/n3ds_extract.py $S/work/dumps/oras.3ds $S/work/oras` (and x); in each extracted folder: `save/main` and
-   `save.metadata` (the game's own save: never another game's), `shared_font.bin` (`tools/make_shared_font.py`), the
-   three system archives (`tools/make_system_archive.py`, from Azahar's `externals/open_source_archives/include`), and
-   `config`: the console configuration, without which the game faults at boot. Take it from any Azahar run:
-   `runs/<name>/Azahar/nand/data/<0s>/sysdata/00010017/00000000/config`.
-4. The memory for `match_functions.py --ram`: a run of `run_local.sh` with `dump 0x00100000 0x00700000
-   ../ram_oras/code.bin` and the same for heap (0x08000000, 0x06000000), linear (0x14000000, 0x08000000) and stack
-   (0x0FF00000, 0x00100000). Addresses with 0x (they are read in base 0: a leading 0 is octal), paths relative to the
-   run's folder, which is emptied when the run starts.
+3. `tools/prepare_game.sh $S/work/dumps/oras.3ds $S/work/oras <save main> <save metadata> <Pomegrade> <an Azahar
+   run dir>` (and the same for X with X's own save): the extraction, the save in place, the system font, the three
+   system archives and `config`, the console configuration taken from the Azahar run (without it the game faults at
+   boot; each Azahar run makes a new one, 14 bytes of 32,768 differing, the game boots with either).
+4. The memory for `match_functions.py --ram`: `tools/azahar_ram.sh <Pomegrade> $S/work ram_oras` (about 6 minutes).
 5. `tools/build_and_run.sh $S 180` (translation about 10 minutes alone; not beside Azahar's build). `$S/work/oras` holds the extracted game (code.bin, cro/, save/), `$S/work/dumps/oras.3ds` the ROM,
 `$S/build_oras_mod` the build. Pomegrade (the owner's other repository, read only here) holds Azahar and its headless
 runner.
@@ -67,7 +63,9 @@ runner.
 | The renderer's speed | `tools/render_bench.sh $S <seconds> [binary]` (top-screen frames from the start; compare builds) |
 | Where the time goes | `tools/sample_stacks.py <pid>` (gdb samples of every thread's stack: no perf here) |
 | To the field, frames written | `tools/field_run.sh $S <out> [seconds] [binary]` (the save in `work/oras/save/main`) |
+| Azahar's picture of the field | `tools/azahar_field_shot.sh <Pomegrade> $S/work <name> <save main>` (about 5 minutes; start it with `field_run.sh`) |
 | The field against Azahar | `tools/field_compare.py <out> <Azahar's shot> --out sheet.png` (shot taken at the same time: the light follows the clock) |
+| The Android APK (our code only) | `tools/build_android.sh <out dir>` (the NDK in `/opt/android-sdk`) |
 | What the draws ask (fog, formats, targets...) | `$HOS_DRAW_STATS=<file>` on a run without `$HOS_RENDER_DIR` (written every 5 s) |
 
 Lessons that cost time, so they are not paid twice:
